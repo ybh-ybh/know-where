@@ -342,6 +342,16 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             },
         )
 
+    # 检查数据库保存的飞书记录引用是否仍然有效。
+    def archive_exists(self, archive: ArchiveResult) -> bool:
+        """远端记录被用户删除后返回假，以便流水线重新归档。"""
+
+        # 归档提供方对应的本地工作区绑定。
+        binding = self._binding_store.get(archive.provider)
+        if binding is None or binding.workspace_id != archive.workspace_id:
+            return False
+        return self._record_id_exists(binding, archive.record_id)
+
     # 按内容 ID 幂等写入归档记录。
     def upsert(
         self,
@@ -769,6 +779,38 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             page_token = str(data.get("page_token", "")) or None
             if page_token is None:
                 return None
+
+    # 分页检查指定记录 ID，避免依赖供应商的“记录不存在”错误码。
+    def _record_id_exists(self, binding: WorkspaceBinding, record_id: str) -> bool:
+        """只在当前数据表仍包含指定记录时返回真。"""
+
+        # 下一页令牌。
+        page_token: str | None = None
+        while True:
+            # 当前页查询参数。
+            params = {"page_size": "500"}
+            if page_token:
+                params["page_token"] = page_token
+            # 当前页记录数据。
+            data = self._request_json(
+                "GET",
+                f"/open-apis/bitable/v1/apps/{binding.workspace_id}/tables/"
+                f"{binding.table_id}/records",
+                params=params,
+            )
+            # 当前页所有有效记录 ID。
+            current_record_ids = {
+                str(item.get("record_id", ""))
+                for item in data.get("items") or []
+                if isinstance(item, dict)
+            }
+            if record_id in current_record_ids:
+                return True
+            if not data.get("has_more"):
+                return False
+            page_token = str(data.get("page_token", "")) or None
+            if page_token is None:
+                return False
 
     # 构造稳定外部引用。
     @staticmethod

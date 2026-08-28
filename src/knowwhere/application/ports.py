@@ -48,6 +48,10 @@ class CategoryCatalogPort(Protocol):
 class RecordArchivePort(Protocol):
     """把结果写入用户可见归档。"""
 
+    # 检查已有外部记录是否仍可用。
+    def archive_exists(self, archive: ArchiveResult) -> bool:
+        """仅在远端记录仍存在时返回真。"""
+
     # 幂等写入一条记录。
     def upsert(
         self,

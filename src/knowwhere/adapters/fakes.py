@@ -80,6 +80,16 @@ class FakeArchive(RecordArchivePort):
 
     # 已归档内容 ID。
     content_ids: list[str] = field(default_factory=list)
+    # 当前仍存在的外部记录 ID。
+    existing_record_ids: set[str] = field(default_factory=set)
+    # 内容 ID 到最近一次 Fake 归档结果的索引。
+    archives_by_content_id: dict[str, ArchiveResult] = field(default_factory=dict)
+
+    # 检查 Fake 外部记录是否仍存在。
+    def archive_exists(self, archive: ArchiveResult) -> bool:
+        """按记录 ID 模拟远端存在性检查。"""
+
+        return archive.record_id in self.existing_record_ids
 
     # 保存内容 ID 并返回 Fake 引用。
     def upsert(
@@ -91,13 +101,23 @@ class FakeArchive(RecordArchivePort):
     ) -> ArchiveResult:
         """模拟外部归档。"""
 
+        # 当前内容仍有效的 Fake 记录。
+        existing_archive = self.archives_by_content_id.get(content_id)
+        if existing_archive is not None and self.archive_exists(existing_archive):
+            return existing_archive
         self.content_ids.append(content_id)
-        return ArchiveResult(
+        # 同一内容删除重建后的递增版本号。
+        generation = self.content_ids.count(content_id)
+        # 确定性的 Fake 归档结果。
+        archive = ArchiveResult(
             provider="fake",
             workspace_id="fake_workspace",
-            record_id=f"fake_{content_id}",
-            record_url=f"https://example.test/{content_id}",
+            record_id=f"fake_{content_id}_{generation}",
+            record_url=f"https://example.test/{content_id}/{generation}",
         )
+        self.existing_record_ids.add(archive.record_id)
+        self.archives_by_content_id[content_id] = archive
+        return archive
 
 
 # 内存任务仓储。

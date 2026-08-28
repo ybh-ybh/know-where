@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from pytest import MonkeyPatch
+
 from knowwhere.adapters.feishu_bitable import (
     CONTENT_ID_FIELD,
     DEFAULT_READ_STATUS,
@@ -17,6 +19,7 @@ from knowwhere.adapters.feishu_bitable import (
 from knowwhere.config import FeishuSettings
 from knowwhere.domain.models import (
     AnalysisResult,
+    ArchiveResult,
     ContentQuality,
     ExtractedContent,
     WorkspaceBinding,
@@ -149,6 +152,77 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
     assert fields["处理次数"] == 1
     assert fields["状态说明"] == "正文包含一处提取警告"
     assert "内容指纹" not in fields
+
+
+# 数据库引用的记录 ID 只有仍出现在远端分页列表中才算有效。
+def test_archive_exists_checks_all_record_pages(monkeypatch: MonkeyPatch) -> None:
+    """验证记录存在性检查支持分页。"""
+
+    # 预置工作区绑定的测试存储。
+    binding_store = _BindingStore()
+    binding_store.put(_binding())
+    # 脱敏测试配置。
+    settings = FeishuSettings(app_id="test_app", app_secret="test_secret")
+    # 待验证的飞书适配器。
+    adapter = FeishuBitableAdapter(settings, binding_store, "test-model")
+    # 两页飞书记录响应。
+    responses = iter(
+        (
+            {"items": [{"record_id": "rec_other"}], "has_more": True, "page_token": "p2"},
+            {"items": [{"record_id": "rec_target"}], "has_more": False},
+        )
+    )
+
+    # 返回下一页测试数据。
+    def fake_request_json(*args: object, **kwargs: object) -> dict[str, object]:
+        """模拟飞书分页接口。"""
+
+        del args, kwargs
+        return next(responses)
+
+    # 使用 pytest monkeypatch 替换网络边界。
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+    # 数据库保存的目标归档引用。
+    archive = ArchiveResult(
+        provider="feishu_bitable",
+        workspace_id="app_test",
+        record_id="rec_target",
+        record_url="https://feishu.cn/base/app_test?record=rec_target",
+    )
+
+    assert adapter.archive_exists(archive) is True
+
+
+# 已从飞书列表删除的记录必须被识别为不存在。
+def test_archive_exists_returns_false_for_deleted_record(monkeypatch: MonkeyPatch) -> None:
+    """验证删除后的旧记录不会继续命中本地去重。"""
+
+    # 预置工作区绑定的测试存储。
+    binding_store = _BindingStore()
+    binding_store.put(_binding())
+    # 脱敏测试配置。
+    settings = FeishuSettings(app_id="test_app", app_secret="test_secret")
+    # 待验证的飞书适配器。
+    adapter = FeishuBitableAdapter(settings, binding_store, "test-model")
+
+    # 返回不包含旧记录的末页数据。
+    def fake_request_json(*args: object, **kwargs: object) -> dict[str, object]:
+        """模拟删除后的飞书记录列表。"""
+
+        del args, kwargs
+        return {"items": [{"record_id": "rec_other"}], "has_more": False}
+
+    # 使用 pytest monkeypatch 替换网络边界。
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+    # 已被用户删除的归档引用。
+    archive = ArchiveResult(
+        provider="feishu_bitable",
+        workspace_id="app_test",
+        record_id="rec_deleted",
+        record_url="https://feishu.cn/base/app_test?record=rec_deleted",
+    )
+
+    assert adapter.archive_exists(archive) is False
 
 
 # 未读视图筛选必须使用飞书远端选项 ID，而不是中文显示名称。

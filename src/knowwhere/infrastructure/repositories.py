@@ -122,6 +122,8 @@ class SqlTaskRepository(TaskRepositoryPort):
                 content_row.body_text = content.body_text
                 content_row.content_hash = content_hash
                 content_row.analysis = analysis_data
+                content_row.archive_provider = archive.provider
+                content_row.workspace_id = archive.workspace_id
                 content_row.record_id = archive.record_id
                 content_row.record_url = archive.record_url
                 content_row.completed_at = datetime.now(UTC)

@@ -59,7 +59,9 @@ class MvpPipeline:
             existing_archive = self._dependencies.tasks.find_completed_archive(
                 content.canonical_url
             )
-            if existing_archive is not None:
+            if existing_archive is not None and self._dependencies.archive.archive_exists(
+                existing_archive
+            ):
                 # 重复提交也必须进入明确终态，不能留下伪装成运行中的任务。
                 task.transition_to(TaskStatus.ANALYZING)
                 self._dependencies.tasks.save(task)
