@@ -98,7 +98,7 @@ def init_feishu(
 # 运行指定 URL 的真实提取、AI 和飞书归档流程。
 @app.command("process")
 def process(
-    url: Annotated[str, typer.Argument(help="公开微信公众号文章 HTTPS 链接")],
+    url: Annotated[str, typer.Argument(help="公开微信公众号或稀土掘金文章 HTTPS 链接")],
     env_file: Annotated[
         Path | None,
         typer.Option("--env-file", exists=True, dir_okay=False),
@@ -124,7 +124,7 @@ def gateway(
         typer.Option("--env-file", exists=True, dir_okay=False),
     ] = None,
 ) -> None:
-    """监听个人用户发送给机器人的微信公众号链接。"""
+    """监听个人用户发送给机器人的受支持文章链接。"""
 
     # 当前生产运行时。
     runtime = build_runtime(env_file)

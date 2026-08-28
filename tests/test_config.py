@@ -80,6 +80,7 @@ def test_env_file_loads_generic_llm_without_tencentcloud(
 
     assert settings.llm.model == "test-model"
     assert settings.llm.timeout_seconds == 120
+    assert settings.llm.thinking_mode == "disabled"
     assert settings.tencentcloud is None
 
 

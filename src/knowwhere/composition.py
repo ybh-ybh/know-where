@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from knowwhere.adapters.article_router import ArticleExtractorRouter
 from knowwhere.adapters.feishu_bitable import FeishuBitableAdapter
+from knowwhere.adapters.juejin import JuejinArticleExtractor
 from knowwhere.adapters.llm_openai import PromptFirstOpenAiCompatibleLlm
 from knowwhere.adapters.wechat import WeChatArticleExtractor
 from knowwhere.application.pipeline import MvpPipeline, PipelineDependencies
@@ -52,7 +54,17 @@ def build_runtime(config_path: Path | None = None) -> Runtime:
     # OpenAI 兼容 LLM 适配器。
     llm = PromptFirstOpenAiCompatibleLlm("openai_compatible", llm_settings)
     # 微信公众号正文提取器。
-    extractor = WeChatArticleExtractor()
+    wechat_extractor = WeChatArticleExtractor()
+    # 稀土掘金正文提取器。
+    juejin_extractor = JuejinArticleExtractor()
+    # 文章平台分派器是应用层看到的唯一内容提取端口。
+    extractor = ArticleExtractorRouter(
+        {
+            "mp.weixin.qq.com": wechat_extractor,
+            "juejin.cn": juejin_extractor,
+            "www.juejin.cn": juejin_extractor,
+        }
+    )
     # 端口依赖集合。
     dependencies = PipelineDependencies(
         extractor=extractor,

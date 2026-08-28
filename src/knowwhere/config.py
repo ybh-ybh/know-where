@@ -99,8 +99,8 @@ class LlmProviderSettings(BaseModel):
     model: str
     # 单次读取超时，长正文模型可通过配置调大。
     timeout_seconds: float = Field(default=180.0, gt=0, le=600)
-    # 部分兼容供应商支持显式开关思考模式；未配置时不发送扩展字段。
-    thinking_mode: Literal["enabled", "disabled"] | None = None
+    # 默认关闭思考模式，避免推理模型只返回思考内容而正文为空。
+    thinking_mode: Literal["enabled", "disabled"] | None = "disabled"
 
     # 在启动阶段拒绝缺少协议或主机名的 LLM 地址。
     @field_validator("base_url")
@@ -172,7 +172,8 @@ class AppSettings(BaseModel):
                 "base_url": values.get("KW_LLM_BASE_URL"),
                 "model": values.get("KW_LLM_MODEL"),
                 "timeout_seconds": values.get("KW_LLM_TIMEOUT_SECONDS", "180"),
-                "thinking_mode": _optional_value(values, "KW_LLM_THINKING_MODE"),
+                # 缺省时关闭思考模式；显式空值仍允许不发送供应商扩展字段。
+                "thinking_mode": values.get("KW_LLM_THINKING_MODE", "disabled") or None,
             },
             "database_url": database_url,
         }

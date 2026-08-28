@@ -7,7 +7,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from knowwhere.gateway import build_message_handler, extract_wechat_url
+from knowwhere.gateway import build_message_handler, extract_supported_url
 
 
 # 文本消息中第一个微信公众号链接应被识别。
@@ -20,7 +20,7 @@ def test_extract_wechat_url_from_text_message() -> None:
         ensure_ascii=False,
     )
 
-    assert extract_wechat_url(content) == ("https://mp.weixin.qq.com/s/5VDN-T9K8Wr-DaQ15-I6CA")
+    assert extract_supported_url(content) == ("https://mp.weixin.qq.com/s/5VDN-T9K8Wr-DaQ15-I6CA")
 
 
 # 飞书富文本/分享卡片中的 href 也必须被识别。
@@ -46,15 +46,30 @@ def test_extract_wechat_url_from_nested_post_message() -> None:
         ensure_ascii=False,
     )
 
-    assert extract_wechat_url(content) == "https://mp.weixin.qq.com/s/nested-test"
+    assert extract_supported_url(content) == "https://mp.weixin.qq.com/s/nested-test"
+
+
+# 带分享参数的稀土掘金文章链接应完整传给平台适配器。
+def test_extract_juejin_url_from_text_message() -> None:
+    """验证稀土掘金链接解析。"""
+
+    # 飞书 text 消息 JSON。
+    content = json.dumps(
+        {"text": "请归档 https://juejin.cn/post/7671106436446011443?share_token=test。"},
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == (
+        "https://juejin.cn/post/7671106436446011443?share_token=test"
+    )
 
 
 # 非法 JSON 和非支持链接都不应触发任务。
 def test_ignore_unsupported_message() -> None:
     """验证消息过滤边界。"""
 
-    assert extract_wechat_url("not-json") is None
-    assert extract_wechat_url('{"text":"https://example.com"}') is None
+    assert extract_supported_url("not-json") is None
+    assert extract_supported_url('{"text":"https://example.com"}') is None
 
 
 # 消息处理器重构后仍应异步处理且在单进程内按 message_id 去重。
