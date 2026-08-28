@@ -1,0 +1,57 @@
+[project]
+name = "knowwhere"
+version = "0.1.0"
+description = "知归：飞书驱动的个人 AI 信息归档工具"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic>=1.16,<2",
+  "beautifulsoup4>=4.13,<5",
+  "httpx>=0.28,<1",
+  "lark-oapi>=1.4,<2",
+  "lxml>=6,<7",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic>=2.11,<3",
+  "python-dotenv>=1.1,<2",
+  "sqlalchemy>=2.0,<3",
+  "typer>=0.16,<1",
+]
+
+[project.scripts]
+knowwhere = "knowwhere.cli:app"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "pytest-cov>=6.2,<7",
+  "respx>=0.22,<1",
+  "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/knowwhere"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["knowwhere"]
+
+[[tool.mypy.overrides]]
+module = ["lark_oapi", "lark_oapi.*"]
+ignore_missing_imports = true

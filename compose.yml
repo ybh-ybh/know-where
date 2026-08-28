@@ -1,0 +1,55 @@
+# 固定 Compose 项目名，避免历史误拼写继续生成错误命名的容器和数据卷。
+name: know-where
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      - .env
+    environment:
+      # PostgreSQL 数据库名由本地环境文件提供。
+      POSTGRES_DB: ${POSTGRES_DB:?请在 .env 中设置 POSTGRES_DB}
+      # PostgreSQL 用户名由本地环境文件提供。
+      POSTGRES_USER: ${POSTGRES_USER:?请在 .env 中设置 POSTGRES_USER}
+      # PostgreSQL 密码由本地环境文件提供，禁止写入版本库。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - knowwhere-postgres:/var/lib/postgresql/data
+
+  app:
+    image: knowwhere:local
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # 容器内数据库地址使用与 PostgreSQL 服务相同的凭据。
+      KW_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?请在 .env 中设置 POSTGRES_USER}:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?请在 .env 中设置 POSTGRES_DB}
+    command: ["migrate-and-health"]
+
+  gateway:
+    profiles: ["gateway"]
+    image: knowwhere:local
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # 容器内数据库地址使用与 PostgreSQL 服务相同的凭据。
+      KW_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?请在 .env 中设置 POSTGRES_USER}:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?请在 .env 中设置 POSTGRES_DB}
+    command: ["gateway"]
+    restart: unless-stopped
+
+volumes:
+  knowwhere-postgres:
