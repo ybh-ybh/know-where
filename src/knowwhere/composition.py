@@ -7,6 +7,7 @@ from pathlib import Path
 
 from knowwhere.adapters.article_router import ArticleExtractorRouter
 from knowwhere.adapters.feishu_bitable import FeishuBitableAdapter
+from knowwhere.adapters.github import GitHubReadmeExtractor
 from knowwhere.adapters.juejin import JuejinArticleExtractor
 from knowwhere.adapters.llm_openai import PromptFirstOpenAiCompatibleLlm
 from knowwhere.adapters.wechat import WeChatArticleExtractor
@@ -57,12 +58,16 @@ def build_runtime(config_path: Path | None = None) -> Runtime:
     wechat_extractor = WeChatArticleExtractor()
     # 稀土掘金正文提取器。
     juejin_extractor = JuejinArticleExtractor()
-    # 文章平台分派器是应用层看到的唯一内容提取端口。
+    # GitHub 仓库 README 提取器。
+    github_extractor = GitHubReadmeExtractor()
+    # 内容平台分派器是应用层看到的唯一内容提取端口。
     extractor = ArticleExtractorRouter(
         {
             "mp.weixin.qq.com": wechat_extractor,
             "juejin.cn": juejin_extractor,
             "www.juejin.cn": juejin_extractor,
+            "github.com": github_extractor,
+            "www.github.com": github_extractor,
         }
     )
     # 端口依赖集合。

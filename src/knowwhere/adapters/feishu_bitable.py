@@ -86,7 +86,7 @@ FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
     FieldDefinition(CONTENT_ID_FIELD, 1),
     FieldDefinition("原始链接", 15),
     FieldDefinition("规范链接", 15),
-    FieldDefinition("平台", 3, ("微信公众号", "掘金", "小红书", "抖音", "其他网页")),
+    FieldDefinition("平台", 3, ("微信公众号", "掘金", "GitHub", "小红书", "抖音", "其他网页")),
     FieldDefinition("平台内容 ID", 1),
     FieldDefinition("内容类型", 3, ("文章", "图文", "视频", "未知")),
     FieldDefinition("作者", 1),
@@ -559,6 +559,8 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
                     f"飞书字段 {definition.name} 类型不兼容: "
                     f"期望 {definition.field_type}，实际 {existing_type}"
                 )
+            if definition.name == "平台":
+                self._ensure_field_options(binding, existing_field, definition.options)
         # 补齐视图并统一隐藏技术字段。
         self._ensure_views(binding)
         return WorkspaceBinding(
@@ -568,6 +570,50 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             primary_field_name=TITLE_FIELD,
             workspace_url=binding.workspace_url,
             schema_version=SCHEMA_VERSION,
+        )
+
+    # 补齐系统必需的单选项，同时保留用户已有选项。
+    def _ensure_field_options(
+        self,
+        binding: WorkspaceBinding,
+        field: dict[str, Any],
+        required_options: tuple[str, ...],
+    ) -> None:
+        """幂等补齐指定字段的必需选项。"""
+
+        # 远端字段属性。
+        property_data = field.get("property") or {}
+        # 远端现有选项对象。
+        existing_options = [
+            dict(option)
+            for option in property_data.get("options") or []
+            if isinstance(option, dict)
+        ]
+        # 现有选项名称集合。
+        existing_names = {
+            str(option.get("name", "")).strip()
+            for option in existing_options
+            if str(option.get("name", "")).strip()
+        }
+        # 待新增的系统必需选项。
+        missing_options = [name for name in required_options if name not in existing_names]
+        if not missing_options:
+            return
+        # 远端字段 ID。
+        field_id = str(field.get("field_id", ""))
+        if not field_id:
+            raise RuntimeError(f"飞书字段 {field.get('field_name', '')} 缺少 field_id")
+        # 更新时保留用户已有选项和其远端 ID。
+        merged_options = [*existing_options, *({"name": name} for name in missing_options)]
+        self._request_json(
+            "PUT",
+            f"/open-apis/bitable/v1/apps/{binding.workspace_id}/tables/"
+            f"{binding.table_id}/fields/{field_id}",
+            json={
+                "field_name": str(field.get("field_name", "")),
+                "type": int(field.get("type", 0)),
+                "property": {"options": merged_options},
+            },
         )
 
     # 把字段声明转为飞书创建字段/建表共用的请求体。

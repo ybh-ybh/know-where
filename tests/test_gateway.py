@@ -64,12 +64,26 @@ def test_extract_juejin_url_from_text_message() -> None:
     )
 
 
+# GitHub 仓库主页链接应完整传给 README 提取器。
+def test_extract_github_repository_url_from_text_message() -> None:
+    """验证 GitHub 仓库链接解析。"""
+
+    # 飞书 text 消息 JSON。
+    content = json.dumps(
+        {"text": "请解读 [WeKnora](https://github.com/Tencent/WeKnora)。"},
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == "https://github.com/Tencent/WeKnora"
+
+
 # 非法 JSON 和非支持链接都不应触发任务。
 def test_ignore_unsupported_message() -> None:
     """验证消息过滤边界。"""
 
     assert extract_supported_url("not-json") is None
     assert extract_supported_url('{"text":"https://example.com"}') is None
+    assert extract_supported_url('{"text":"https://github.com/Tencent/WeKnora/issues/1"}') is None
 
 
 # 消息处理器重构后仍应异步处理且在单进程内按 message_id 去重。

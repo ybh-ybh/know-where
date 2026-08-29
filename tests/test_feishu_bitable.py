@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from unittest.mock import Mock
 
 from pytest import MonkeyPatch
 
@@ -113,14 +114,58 @@ def test_schema_v2_uses_clean_typed_fields() -> None:
     read_status = next(
         definition for definition in FIELD_DEFINITIONS if definition.name == READ_STATUS_FIELD
     )
+    # 平台字段应支持 GitHub 仓库 README。
+    platform = next(definition for definition in FIELD_DEFINITIONS if definition.name == "平台")
 
     assert field_names[0] == TITLE_FIELD
     assert read_status.field_type == 3
     assert read_status.options == READ_STATUS_OPTIONS == ("未读", "已读")
+    assert "GitHub" in platform.options
     assert "单选" not in field_names
     assert "日期" not in field_names
     assert "附件" not in field_names
     assert "内容指纹" not in field_names
+
+
+# 已有工作区必须补齐 GitHub 平台选项，同时保留用户自定义选项。
+def test_ensure_platform_options_preserves_existing_values(monkeypatch: MonkeyPatch) -> None:
+    """验证平台单选项兼容迁移。"""
+
+    # 待验证的飞书适配器。
+    adapter = _adapter()
+    # 记录更新字段 API 请求。
+    request_json = Mock()
+    monkeypatch.setattr(adapter, "_request_json", request_json)
+    # 缺少 GitHub 但含用户自定义值的远端平台字段。
+    field = {
+        "field_id": "fld_platform",
+        "field_name": "平台",
+        "type": 3,
+        "property": {
+            "options": [
+                {"id": "opt_wechat", "name": "微信公众号"},
+                {"id": "opt_custom", "name": "自定义平台"},
+            ]
+        },
+    }
+
+    adapter._ensure_field_options(_binding(), field, ("微信公众号", "GitHub"))
+
+    request_json.assert_called_once_with(
+        "PUT",
+        "/open-apis/bitable/v1/apps/app_test/tables/table_test/fields/fld_platform",
+        json={
+            "field_name": "平台",
+            "type": 3,
+            "property": {
+                "options": [
+                    {"id": "opt_wechat", "name": "微信公众号"},
+                    {"id": "opt_custom", "name": "自定义平台"},
+                    {"name": "GitHub"},
+                ]
+            },
+        },
+    )
 
 
 # 新记录应使用飞书真实类型，并把阅读状态默认设为未读。

@@ -2,7 +2,7 @@
 
 让散落的信息各归其位。
 
-知归是一个仅供个人使用的 AI 信息归档工具。当前 MVP 支持把公开微信公众号和稀土掘金文章发送给飞书机器人，自动提取完整正文、调用 OpenAI 兼容模型生成分类与摘要，并归档到系统创建的飞书多维表格。
+知归是一个仅供个人使用的 AI 信息归档工具。当前 MVP 支持把公开微信公众号、稀土掘金文章和 GitHub 仓库发送给飞书机器人，自动提取完整正文或根目录 README、调用 OpenAI 兼容模型生成分类与摘要，并归档到系统创建的飞书多维表格。
 
 ## 当前能力
 
@@ -11,6 +11,7 @@
 - 从“一级分类”单选字段读取默认及用户自定义分类。
 - 微信公众号文章 UTF-8 正文、标题、作者和发布时间提取。
 - 稀土掘金文章 SSR Markdown/DOM 双路径正文、标题、作者和发布时间提取。
+- GitHub 公开仓库根目录 README Markdown 原文提取。
 - 提示词主约束 + few-shot + `json_object` + Pydantic Schema 校验。
 - 首轮非法 JSON 后进行一次受限修复；仍失败时明确降级，不写非法分类。
 - PostgreSQL 保存任务状态、完整正文、AI 结果和飞书外部引用。
@@ -23,7 +24,7 @@
 
 ```text
 飞书私聊 / CLI
-  → 文章平台分派器（微信 / 掘金）
+  → 内容平台分派器（微信 / 掘金 / GitHub）
   → 飞书分类目录
   → OpenAI 兼容 LLM
   → 飞书多维表格
@@ -55,6 +56,7 @@ uv run knowwhere migrate-and-health
 uv run knowwhere init-feishu
 uv run knowwhere process "https://mp.weixin.qq.com/s/文章ID"
 uv run knowwhere process "https://juejin.cn/post/文章ID"
+uv run knowwhere process "https://github.com/Tencent/WeKnora"
 ```
 
 默认读取根目录 `.env`；需要使用其他文件时，可为命令传入 `--env-file 路径`。进程环境变量的优先级高于文件值，便于容器或密钥管理服务覆盖。
@@ -78,7 +80,7 @@ docker compose --profile gateway up -d postgres gateway
 docker compose --profile gateway ps
 ```
 
-此时把一个公开微信公众号或稀土掘金文章链接私聊发送给机器人即可。Gateway 会先回复“已收到”，完成后回复飞书记录链接。
+此时把公开微信公众号、稀土掘金文章或 GitHub 仓库链接私聊发送给机器人即可。Gateway 会先回复“已收到”，完成后回复飞书记录链接。
 
 容器内手工处理一篇文章：
 
@@ -110,7 +112,7 @@ docker compose --profile gateway down
 ```text
 src/knowwhere/domain/          领域对象与状态机
 src/knowwhere/application/     端口和处理流水线
-src/knowwhere/adapters/        微信、掘金、LLM、飞书与 Fake 适配器
+src/knowwhere/adapters/        微信、掘金、GitHub、LLM、飞书与 Fake 适配器
 src/knowwhere/infrastructure/  PostgreSQL 映射与仓储
 alembic/                       数据库迁移
 tests/                         离线回归测试

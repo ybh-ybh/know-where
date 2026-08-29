@@ -17,11 +17,14 @@ if TYPE_CHECKING:
         P2ImMessageReceiveV1,
     )
 
-# 文章链接匹配只接受当前已接入的平台和路径形式。
+# 内容链接匹配只接受当前已接入的平台和路径形式。
 SUPPORTED_ARTICLE_URL_PATTERN = re.compile(
     r"https://(?:"
     r"mp\.weixin\.qq\.com/[^\s<>\"']+|"
-    r"(?:www\.)?juejin\.cn/post/\d+(?:\?[^\s<>\"']*)?"
+    r"(?:www\.)?juejin\.cn/post/\d+(?:\?[^\s<>\"']*)?|"
+    r"(?:www\.)?github\.com/[A-Za-z0-9][A-Za-z0-9-]{0,38}/"
+    r"[A-Za-z0-9._-]{1,100}/?(?:[?#][^\s<>\"']*)?"
+    r"(?![A-Za-z0-9._/-])"
     r")"
 )
 
@@ -41,7 +44,7 @@ def _string_values(value: object) -> list[str]:
     return []
 
 
-# 从飞书 text/post/card 消息 JSON 中提取第一个受支持文章链接。
+# 从飞书 text/post/card 消息 JSON 中提取第一个受支持内容链接。
 def extract_supported_url(message_content: str) -> str | None:
     """解析飞书消息正文。"""
 
@@ -55,7 +58,7 @@ def extract_supported_url(message_content: str) -> str | None:
         # 当前字符串中的第一个受支持链接。
         match = SUPPORTED_ARTICLE_URL_PATTERN.search(text)
         if match is not None:
-            return match.group(0).rstrip('。；，,;)]}"')
+            return match.group(0).rstrip('。；，,;.:)]}"')
     return None
 
 
@@ -171,8 +174,8 @@ class _MessageHandler:
         try:
             self._reply_client.reply_text(
                 message_id,
-                "知归已收到消息，但没有识别到微信公众号或稀土掘金文章链接。"
-                "请直接粘贴 https://mp.weixin.qq.com/... 或 https://juejin.cn/post/... 链接。",
+                "知归已收到消息，但没有识别到微信公众号、稀土掘金文章或 GitHub 仓库链接。"
+                "请直接粘贴受支持的文章链接，或 https://github.com/所有者/仓库 链接。",
             )
         except Exception:
             return
@@ -210,7 +213,7 @@ class _MessageHandler:
         open_id = sender_id.open_id if sender_id is not None else ""
         if not message_id or not open_id or not self._mark_seen(message_id):
             return
-        # 支持的文章链接。
+        # 支持的内容链接。
         url = extract_supported_url(message.content or "")
         # 只输出安全元数据，绝不记录消息正文、用户 open_id 或完整 message_id。
         print(
