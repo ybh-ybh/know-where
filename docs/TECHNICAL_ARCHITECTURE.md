@@ -11,7 +11,7 @@
 | 创建日期 | 2026-08-27 |
 | 关联需求 | [PRD v1.3](./PRD.md) |
 | 架构形态 | 模块化单体 + 独立 Worker + 可选重型适配器容器 |
-| 主要部署 | Docker Compose，单机自托管 |
+| 主要部署 | Docker Compose 应用容器 + 用户自建 PostgreSQL |
 
 ### 0.1 文档目标
 
@@ -163,7 +163,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `gateway` | 是 | 飞书长连接、事件校验、任务创建、Outbox 通知、健康检查 | 否 |
 | `worker` | 是 | 执行任务流水线和重试 | 否，状态写 PostgreSQL |
-| `postgres` | 是 | 任务、内容索引、阶段检查点、Outbox、适配器绑定 | 是 |
+| 用户自建 PostgreSQL | 外部必需 | 任务、内容索引、阶段检查点、Outbox、适配器绑定；不由 Compose 管理 | 是 |
 | `crawler` | 推荐 | Crawl4AI 浏览器抓取服务 | 否 |
 | `asr-local` | 可选 profile | faster-whisper 本地 ASR | 否，模型可缓存到卷 |
 | `xhs-adapter` | 可选 | 小红书工具封装为稳定内部协议 | 否 |
@@ -175,12 +175,12 @@ flowchart LR
 
 | Profile | 组合 | 使用场景 |
 | --- | --- | --- |
-| `core` | gateway、worker、postgres、crawler | 使用云 ASR 的最小部署 |
+| `core` | gateway、worker、crawler + 外部 PostgreSQL | 使用云 ASR 的最小部署 |
 | `local-asr-cpu` | core + CPU faster-whisper | 无 GPU 的本地转录 |
 | `local-asr-gpu` | core + GPU faster-whisper | NVIDIA GPU 本地转录 |
 | `platform-tools` | core + xhs-adapter + douyin-adapter | 使用本地平台工具 |
 
-Docker Compose 能在一个 YAML 中定义服务、网络和卷，适合作为个人单机部署基线；相关能力见 [Docker Compose 官方文档](https://docs.docker.com/compose/)。
+Docker Compose 负责应用服务、网络和临时卷，PostgreSQL 通过 `KW_DATABASE_URL` 接入并由用户独立运维；相关能力见 [Docker Compose 官方文档](https://docs.docker.com/compose/)。
 
 ---
 
@@ -646,7 +646,7 @@ sequenceDiagram
 | API/健康检查 | FastAPI | 基于 Python 类型提示，适合边界 DTO 和 OpenAPI；[官方文档](https://fastapi.tiangolo.com/) | Starlette、Litestar、Flask；仅替换 entrypoint |
 | 边界校验 | Pydantic v2 | 类型驱动的验证和序列化；[官方文档](https://docs.pydantic.dev/latest/) | msgspec、dataclasses + jsonschema；领域对象不依赖 Pydantic |
 | HTTP 客户端 | HTTPX | 异步、超时和连接池能力，适合适配器 | aiohttp、供应商 SDK 内置客户端；封装在适配器 |
-| 数据库 | PostgreSQL 16+ | 事务、JSONB、行锁、可靠并发领取任务 | MySQL 或 SQLite 需重写 Repository/TaskBackend 适配器 |
+| 数据库 | PostgreSQL 15+ | 事务、JSONB、行锁、可靠并发领取任务；由用户独立部署和备份 | MySQL 或 SQLite 需重写 Repository/TaskBackend 适配器 |
 | ORM | SQLAlchemy 2.x | Repository 中成熟的映射和事务支持 | psycopg SQL、SQLModel、其他 ORM；不进入领域层 |
 | 数据迁移 | Alembic | 与 SQLAlchemy 配套、迁移可审计 | 原生 SQL 迁移、Flyway；仅基础设施层 |
 | 任务后端 | PostgreSQL 租约队列 | 单事实源、无 Redis 双写、适合个人低并发和长任务 | Celery/Redis、Dramatiq、Temporal、云队列，实现 `TaskBackendPort` |
@@ -857,7 +857,7 @@ docs/
 - 镜像固定依赖版本和基础镜像摘要。
 - 浏览器、ASR 和核心服务分别使用最小文件挂载。
 - Cookie 卷只授予需要登录态的平台适配器。
-- 本地临时工作卷不挂载到 gateway 和 postgres；COS 凭据只注入需要上传、签名或清理对象的 Worker。
+- 本地临时工作卷不挂载到 gateway；COS 凭据只注入需要上传、签名或清理对象的 Worker。
 
 ---
 
@@ -1068,7 +1068,7 @@ docs/
 9. 完整正文或转录持久化前，任务不能进入 `completed`。
 10. 原始音视频在终态后被清理，模型缓存和完整转录不受影响。
 11. PostgreSQL 任务后端可以被 Fake 后端替换运行单元测试。
-12. Docker Compose 在干净主机可启动、健康检查通过、重启后任务可恢复。
+12. 配置可访问的用户自建 PostgreSQL 后，Docker Compose 在干净主机可启动、健康检查通过、重启后任务可恢复。
 13. 首次绑定会创建且只创建一套飞书归档资源；重启只校验或迁移，不重复创建。
 14. 腾讯云 COS 与本地 Artifact Store 通过同一契约测试；切换实现不修改转录、任务或归档用例。
 15. COS 上传、预签名读取、幂等删除和失败补偿通过真实 Bucket 集成测试，终态后没有知归临时对象残留。

@@ -37,12 +37,12 @@
 
 1. 安装 Python 3.12、[uv](https://docs.astral.sh/uv/) 和 Docker Desktop。
 2. 复制 `.env.example` 为 `.env`。
-3. 填入飞书和一个 OpenAI 兼容 LLM 的必填配置；视频链路需要时再填写腾讯云配置。
+3. 填入用户自建 PostgreSQL、飞书和一个 OpenAI 兼容 LLM 的必填配置；视频链路需要时再填写腾讯云配置。
 4. 确认飞书应用已经发布、启用机器人能力，并订阅 `im.message.receive_v1` 事件。
 
 `.env` 已被 Git 和 Docker 构建上下文忽略。不要把真实密钥写进镜像、日志、提交、Issue 或问题截图。Docker Compose 通过 `env_file` 在运行时注入配置，不把密钥复制进镜像。
 
-PostgreSQL 数据库名、用户名和密码必须在本地 `.env` 中设置；Compose 只做运行时引用，并只把开发数据库映射到 `127.0.0.1:5432`。公网或服务器部署时应使用独立强密码，并避免暴露数据库端口。
+PostgreSQL 由用户自行部署和备份，Compose 不再创建数据库容器或数据卷。请在 `.env` 的 `KW_DATABASE_URL` 中填写完整连接地址，并确保数据库已创建、应用主机可访问；密码含特殊字符时先做 URL 编码。数据库端口不要向无关公网来源开放。
 
 LLM 统一使用 `KW_LLM_API_KEY`、`KW_LLM_BASE_URL` 和 `KW_LLM_MODEL`，不在配置结构中绑定具体厂商。`KW_LLM_THINKING_MODE` 是非标准兼容扩展，默认 `disabled`；需要时可设为 `enabled`，供应商不支持该字段时保持为空。
 
@@ -51,7 +51,6 @@ LLM 统一使用 `KW_LLM_API_KEY`、`KW_LLM_BASE_URL` 和 `KW_LLM_MODEL`，不�
 ```powershell
 Copy-Item .env.example .env
 uv sync --all-groups
-docker compose up -d postgres
 uv run knowwhere migrate-and-health
 uv run knowwhere init-feishu
 uv run knowwhere process "https://mp.weixin.qq.com/s/文章ID"
@@ -72,11 +71,12 @@ uv run pytest
 
 ## Docker Compose 运行
 
-构建并启动 PostgreSQL 与飞书长连接 Gateway：
+先对用户自建 PostgreSQL 执行迁移和健康检查，再构建并启动飞书长连接 Gateway：
 
 ```powershell
 docker compose build gateway
-docker compose --profile gateway up -d postgres gateway
+docker compose run --rm app
+docker compose --profile gateway up -d gateway
 docker compose --profile gateway ps
 ```
 
@@ -94,6 +94,8 @@ docker compose run --rm app process `
 ```powershell
 docker compose --profile gateway down
 ```
+
+该命令只停止应用容器，不会停止或删除用户自建 PostgreSQL。
 
 ## LLM JSON 可靠性策略
 
