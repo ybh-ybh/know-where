@@ -84,6 +84,8 @@ class ExtractedContent:
 class AnalysisResult:
     """分类与摘要结果。"""
 
+    # AI 生成的简短标题。
+    short_title: str
     # 一级分类。
     primary_category: str
     # 分类置信度。

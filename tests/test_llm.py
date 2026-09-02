@@ -12,6 +12,7 @@ from knowwhere.domain.models import ContentQuality, ExtractedContent
 
 # 合法的结构化模型输出。
 VALID_PAYLOAD = {
+    "short_title": "智能体上下文工程",
     "primary_category": "技术与 AI",
     "category_confidence": 0.91,
     "tags": ["智能体", "上下文工程", "软件开发"],
@@ -78,6 +79,7 @@ def test_direct_json_output() -> None:
     # 分析结果。
     result = adapter.analyze(_content(), ("技术与 AI", "其他"))
 
+    assert result.short_title == "智能体上下文工程"
     assert result.primary_category == "技术与 AI"
     assert result.degraded is False
 
@@ -120,5 +122,22 @@ def test_invalid_json_twice_uses_explicit_fallback() -> None:
     result = adapter.analyze(_content(), ("技术与 AI", "其他"))
 
     assert result.primary_category == "其他"
+    assert result.short_title == "智能体上下文工程"
     assert result.degraded is True
     assert "LLM_JSON_DEGRADED" in result.warnings
+    assert "AI_TITLE_DEGRADED" in result.warnings
+
+
+# 超长短标题不满足 Schema，修复失败后必须使用安全兜底。
+def test_overlong_short_title_uses_explicit_fallback() -> None:
+    """验证短标题最大长度约束。"""
+
+    # 超过 30 个字符的结构化输出。
+    invalid_payload = {**VALID_PAYLOAD, "short_title": "过长标题" * 10}
+    # 两轮都返回同一个超长标题。
+    adapter = _adapter([json.dumps(invalid_payload), json.dumps(invalid_payload)])
+    # 降级分析结果。
+    result = adapter.analyze(_content(), ("技术与 AI", "其他"))
+
+    assert result.short_title == "智能体上下文工程"
+    assert result.degraded is True

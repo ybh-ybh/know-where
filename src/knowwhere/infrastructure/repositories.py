@@ -84,6 +84,7 @@ class SqlTaskRepository(TaskRepositoryPort):
         content_id = f"cnt_{content_hash[:24]}"
         # 可 JSON 化分析结果。
         analysis_data = {
+            "short_title": analysis.short_title,
             "primary_category": analysis.primary_category,
             "category_confidence": analysis.category_confidence,
             "tags": list(analysis.tags),

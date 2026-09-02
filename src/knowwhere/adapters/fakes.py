@@ -53,6 +53,7 @@ class FakeLlm(LlmProviderPort):
         """生成离线分析。"""
 
         return AnalysisResult(
+            short_title="离线测试文章",
             primary_category=allowed_categories[0],
             category_confidence=1.0,
             tags=("测试", "离线", "契约"),

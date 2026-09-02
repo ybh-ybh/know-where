@@ -39,7 +39,7 @@ DEFAULT_CATEGORIES: Final[tuple[str, ...]] = (
 )
 
 # 当前由应用管理的多维表格 Schema 版本。
-SCHEMA_VERSION: Final[int] = 2
+SCHEMA_VERSION: Final[int] = 3
 
 # 飞书多维表格的数据表名称。
 TABLE_NAME: Final[str] = "内容库"
@@ -50,11 +50,17 @@ DEFAULT_VIEW_NAME: Final[str] = "收件箱"
 # 飞书主字段名称。
 TITLE_FIELD: Final[str] = "标题"
 
+# 原始来源标题字段名称。
+ORIGINAL_TITLE_FIELD: Final[str] = "原始标题"
+
 # 飞书归档记录的稳定内容标识字段名。
 CONTENT_ID_FIELD: Final[str] = "内容 ID"
 
 # 用户可编辑的阅读状态字段名称。
 READ_STATUS_FIELD: Final[str] = "阅读状态"
+
+# 用户可填写的阅读时间字段名称。
+READING_TIME_FIELD: Final[str] = "阅读时间"
 
 # 新归档内容的默认阅读状态。
 DEFAULT_READ_STATUS: Final[str] = "未读"
@@ -83,6 +89,7 @@ class FieldDefinition:
 # 系统管理字段按用户阅读顺序排列；首字段会成为飞书主字段。
 FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
     FieldDefinition(TITLE_FIELD, 1),
+    FieldDefinition(ORIGINAL_TITLE_FIELD, 1),
     FieldDefinition(CONTENT_ID_FIELD, 1),
     FieldDefinition("原始链接", 15),
     FieldDefinition("规范链接", 15),
@@ -93,6 +100,7 @@ FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
     FieldDefinition("原发布时间", 5, date_formatter="yyyy/MM/dd HH:mm"),
     FieldDefinition("收藏时间", 5, date_formatter="yyyy/MM/dd HH:mm"),
     FieldDefinition(READ_STATUS_FIELD, 3, READ_STATUS_OPTIONS),
+    FieldDefinition(READING_TIME_FIELD, 5, date_formatter="yyyy/MM/dd HH:mm"),
     FieldDefinition("一级分类", 3, DEFAULT_CATEGORIES),
     FieldDefinition("分类置信度", 2, formatter="0.0000"),
     FieldDefinition("标签", 4),
@@ -114,6 +122,7 @@ FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
 # 默认工作视图只展示日常整理需要的字段。
 DEFAULT_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     TITLE_FIELD,
+    ORIGINAL_TITLE_FIELD,
     "原始链接",
     "平台",
     "内容类型",
@@ -121,6 +130,7 @@ DEFAULT_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     "原发布时间",
     "收藏时间",
     READ_STATUS_FIELD,
+    READING_TIME_FIELD,
     "一级分类",
     "标签",
     "一句话摘要",
@@ -135,8 +145,10 @@ DEFAULT_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
 # 全文视图聚焦阅读原文和完整归档内容。
 FULL_TEXT_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     TITLE_FIELD,
+    ORIGINAL_TITLE_FIELD,
     "原始链接",
     READ_STATUS_FIELD,
+    READING_TIME_FIELD,
     "完整正文/转录",
     "全文保存方式",
     "飞书全文文档",
@@ -179,7 +191,7 @@ class ViewDefinition:
     resolve_option_ids: bool = True
 
 
-# Schema v2 的默认视图集合。
+# Schema v3 的默认视图集合。
 VIEW_DEFINITIONS: Final[tuple[ViewDefinition, ...]] = (
     ViewDefinition(DEFAULT_VIEW_NAME, DEFAULT_VISIBLE_FIELDS),
     ViewDefinition("未读", DEFAULT_VISIBLE_FIELDS, READ_STATUS_FIELD, (DEFAULT_READ_STATUS,)),
@@ -397,7 +409,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
         analysis: AnalysisResult,
         collected_at: datetime,
     ) -> dict[str, Any]:
-        """构造一条 Schema v2 归档记录。"""
+        """构造一条 Schema v3 归档记录。"""
 
         # 提取与分析警告合并后保序去重。
         warnings = tuple(dict.fromkeys((*content.warnings, *analysis.warnings)))
@@ -415,7 +427,8 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
         )
         # 基础字段映射。
         fields: dict[str, Any] = {
-            binding.primary_field_name: content.title[:1000],
+            binding.primary_field_name: analysis.short_title,
+            ORIGINAL_TITLE_FIELD: content.title[:1000],
             CONTENT_ID_FIELD: content_id,
             "原始链接": self._url_value(content.source_url, "查看原文"),
             "规范链接": self._url_value(content.canonical_url, "规范链接"),
@@ -497,7 +510,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             if not tables:
                 raise RuntimeError("飞书新建多维表格没有默认数据表")
             default_table_id = str(tables[0].get("table_id", ""))
-        # Schema v2 表结构由创建接口原子写入，不保留飞书自带的空白字段。
+        # Schema v3 表结构由创建接口原子写入，不保留飞书自带的空白字段。
         table_data = self._request_json(
             "POST",
             f"/open-apis/bitable/v1/apps/{app_token}/tables",
@@ -644,7 +657,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
 
     # 幂等补齐系统视图，并管理字段可见性与公开 API 支持的筛选。
     def _ensure_views(self, binding: WorkspaceBinding) -> None:
-        """补齐并配置 Schema v2 视图。"""
+        """补齐并配置 Schema v3 视图。"""
 
         # 远端字段集合。
         fields = self._list_fields(binding)

@@ -11,8 +11,10 @@ from knowwhere.adapters.feishu_bitable import (
     CONTENT_ID_FIELD,
     DEFAULT_READ_STATUS,
     FIELD_DEFINITIONS,
+    ORIGINAL_TITLE_FIELD,
     READ_STATUS_FIELD,
     READ_STATUS_OPTIONS,
+    READING_TIME_FIELD,
     TITLE_FIELD,
     VIEW_DEFINITIONS,
     FeishuBitableAdapter,
@@ -67,7 +69,7 @@ def _binding() -> WorkspaceBinding:
         table_id="table_test",
         primary_field_name=TITLE_FIELD,
         workspace_url="https://feishu.cn/base/app_test",
-        schema_version=2,
+        schema_version=3,
     )
 
 
@@ -94,6 +96,7 @@ def _analysis() -> AnalysisResult:
     """返回测试分析结果。"""
 
     return AnalysisResult(
+        short_title="AI生成短标题",
         primary_category="技术与 AI",
         category_confidence=0.875,
         tags=("AI", "知识管理"),
@@ -104,8 +107,8 @@ def _analysis() -> AnalysisResult:
     )
 
 
-# Schema v2 必须使用干净字段并提供固定阅读状态枚举。
-def test_schema_v2_uses_clean_typed_fields() -> None:
+# Schema v3 必须使用双标题和相邻的阅读状态、阅读时间字段。
+def test_schema_v3_uses_titles_and_reading_fields() -> None:
     """验证字段集合和阅读状态定义。"""
 
     # 声明字段名称。
@@ -114,12 +117,19 @@ def test_schema_v2_uses_clean_typed_fields() -> None:
     read_status = next(
         definition for definition in FIELD_DEFINITIONS if definition.name == READ_STATUS_FIELD
     )
+    # 阅读时间字段定义。
+    reading_time = next(
+        definition for definition in FIELD_DEFINITIONS if definition.name == READING_TIME_FIELD
+    )
     # 平台字段应支持 GitHub 仓库 README。
     platform = next(definition for definition in FIELD_DEFINITIONS if definition.name == "平台")
 
-    assert field_names[0] == TITLE_FIELD
+    assert field_names[:2] == (TITLE_FIELD, ORIGINAL_TITLE_FIELD)
+    assert field_names.index(READING_TIME_FIELD) == field_names.index(READ_STATUS_FIELD) + 1
     assert read_status.field_type == 3
     assert read_status.options == READ_STATUS_OPTIONS == ("未读", "已读")
+    assert reading_time.field_type == 5
+    assert reading_time.date_formatter == "yyyy/MM/dd HH:mm"
     assert "GitHub" in platform.options
     assert "单选" not in field_names
     assert "日期" not in field_names
@@ -174,7 +184,7 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
 
     # 固定收藏时间。
     collected_at = datetime(2026, 8, 28, 9, 30, tzinfo=UTC)
-    # Schema v2 记录映射。
+    # Schema v3 记录映射。
     fields = _adapter()._record_fields(
         _binding(),
         "cnt_test",
@@ -184,7 +194,10 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
     )
 
     assert fields[CONTENT_ID_FIELD] == "cnt_test"
+    assert fields[TITLE_FIELD] == "AI生成短标题"
+    assert fields[ORIGINAL_TITLE_FIELD] == "测试文章"
     assert fields[READ_STATUS_FIELD] == DEFAULT_READ_STATUS
+    assert READING_TIME_FIELD not in fields
     assert fields["原始链接"] == {
         "link": "https://mp.weixin.qq.com/s/source-id",
         "text": "查看原文",
