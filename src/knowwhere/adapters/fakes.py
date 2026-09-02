@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from knowwhere.application.ports import (
     CategoryCatalogPort,
     ContentExtractorPort,
+    ExtractionProgress,
     LlmProviderPort,
     RecordArchivePort,
     TaskRepositoryPort,
@@ -29,7 +30,11 @@ class FakeExtractor(ContentExtractorPort):
     content: ExtractedContent
 
     # 忽略 URL 返回内容。
-    def extract(self, url: str) -> ExtractedContent:
+    def extract(
+        self,
+        url: str,
+        progress: ExtractionProgress | None = None,
+    ) -> ExtractedContent:
         """返回预置结果。"""
 
         return self.content

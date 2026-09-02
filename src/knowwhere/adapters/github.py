@@ -7,7 +7,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
-from knowwhere.application.ports import ContentExtractorPort
+from knowwhere.application.ports import ContentExtractorPort, ExtractionProgress
 from knowwhere.domain.models import ContentQuality, ExtractedContent
 
 
@@ -35,7 +35,11 @@ class GitHubReadmeExtractor(ContentExtractorPort):
         )
 
     # 下载并返回仓库根目录 README Markdown。
-    def extract(self, url: str) -> ExtractedContent:
+    def extract(
+        self,
+        url: str,
+        progress: ExtractionProgress | None = None,
+    ) -> ExtractedContent:
         """提取公开 GitHub 仓库的 README 原文。"""
 
         # 已校验的仓库所有者、仓库名与规范地址。

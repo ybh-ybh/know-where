@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from knowwhere.domain.models import (
@@ -12,13 +13,20 @@ from knowwhere.domain.models import (
     WorkspaceBinding,
 )
 
+# 提取器通过回调持久化阶段进度，数据中不得包含凭据或临时签名 URL。
+ExtractionProgress = Callable[[str, dict[str, object]], None]
+
 
 # 内容提取端口。
 class ContentExtractorPort(Protocol):
     """把 URL 转换为规范内容。"""
 
     # 提取指定地址。
-    def extract(self, url: str) -> ExtractedContent:
+    def extract(
+        self,
+        url: str,
+        progress: ExtractionProgress | None = None,
+    ) -> ExtractedContent:
         """提取并清洗正文。"""
 
 
@@ -111,6 +119,10 @@ class ArtifactStorePort(Protocol):
     def put(self, data: bytes, suffix: str) -> str:
         """保存临时对象。"""
 
+    # 为私有对象创建短时只读 URL。
+    def create_download_url(self, artifact_ref: str) -> str:
+        """返回限时下载 URL。"""
+
     # 删除不透明引用。
     def delete(self, artifact_ref: str) -> None:
         """幂等清理对象。"""
@@ -121,5 +133,14 @@ class AsrProviderPort(Protocol):
     """把标准音频引用转成文本。"""
 
     # 转录一个标准音频分段。
-    def transcribe(self, artifact_ref: str) -> str:
+    def transcribe(self, artifact_url: str) -> str:
         """返回当前分段文本。"""
+
+
+# 视觉模型端口只接收可短时访问的图片地址。
+class VisionProviderPort(Protocol):
+    """把有序图片和作品配文转换为可归档正文。"""
+
+    # 按图片原顺序执行 OCR 和语义理解。
+    def describe(self, image_urls: tuple[str, ...], caption: str) -> str:
+        """返回完整图文正文。"""

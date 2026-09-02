@@ -31,9 +31,13 @@ app = typer.Typer(no_args_is_help=True, help="知归（KnowWhere）MVP 管理命
 def _upgrade_database(settings: AppSettings) -> None:
     """升级 PostgreSQL Schema。"""
 
-    # Alembic 配置对象。
-    alembic_config = Config("alembic.ini")
-    alembic_config.set_main_option("sqlalchemy.url", settings.database_url)
+    # 直接构造程序化配置，避免 Windows 本地编码读取 UTF-8 ini 注释失败。
+    alembic_config = Config()
+    alembic_config.set_main_option("script_location", "alembic")
+    alembic_config.set_main_option("prepend_sys_path", ". src")
+    # ConfigParser 使用百分号做插值，URL 编码后的密码必须先转义再写入配置。
+    escaped_database_url = settings.database_url.replace("%", "%%")
+    alembic_config.set_main_option("sqlalchemy.url", escaped_database_url)
     command.upgrade(alembic_config, "head")
 
 
@@ -100,14 +104,14 @@ def init_feishu(
 def process(
     url: Annotated[
         str,
-        typer.Argument(help="公开微信/掘金文章或 GitHub 仓库 HTTPS 链接"),
+        typer.Argument(help="公开微信/掘金/GitHub 或抖音图文与视频 HTTPS 链接"),
     ],
     env_file: Annotated[
         Path | None,
         typer.Option("--env-file", exists=True, dir_okay=False),
     ] = None,
 ) -> None:
-    """处理一篇文章或仓库 README 并输出飞书记录链接。"""
+    """处理受支持的文章、图文或视频并输出飞书记录链接。"""
 
     # 当前生产运行时。
     runtime = build_runtime(env_file)

@@ -54,7 +54,14 @@ class MvpPipeline:
             task.transition_to(TaskStatus.EXTRACTING)
             self._dependencies.tasks.save(task)
             # 提取后的内容是后续阶段唯一事实输入。
-            content = self._dependencies.extractor.extract(url)
+            # 进度回调只保存可恢复阶段，不允许适配器传入凭据或短签名 URL。
+            def save_extraction_progress(stage: str, data: dict[str, object]) -> None:
+                """持久化提取器最近完成的检查点。"""
+
+                task.checkpoint(stage, data)
+                self._dependencies.tasks.save(task)
+
+            content = self._dependencies.extractor.extract(url, save_extraction_progress)
             # 完成记录按规范 URL 去重。
             existing_archive = self._dependencies.tasks.find_completed_archive(
                 content.canonical_url

@@ -16,7 +16,9 @@ config = context.config
 database_url = os.getenv("KW_DATABASE_URL") or config.get_main_option("sqlalchemy.url")
 if not database_url:
     raise RuntimeError("必须通过 KW_DATABASE_URL 提供 Alembic 数据库地址")
-config.set_main_option("sqlalchemy.url", database_url)
+# ConfigParser 写回配置时同样要求把 URL 编码中的百分号转义。
+escaped_database_url = database_url.replace("%", "%%")
+config.set_main_option("sqlalchemy.url", escaped_database_url)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 # 自动迁移元数据。

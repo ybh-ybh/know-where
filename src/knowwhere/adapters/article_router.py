@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
-from knowwhere.application.ports import ContentExtractorPort
+from knowwhere.application.ports import ContentExtractorPort, ExtractionProgress
 from knowwhere.domain.models import ExtractedContent
 
 
@@ -23,7 +23,11 @@ class ArticleExtractorRouter(ContentExtractorPort):
         }
 
     # 根据 URL 主机名调用对应提取器。
-    def extract(self, url: str) -> ExtractedContent:
+    def extract(
+        self,
+        url: str,
+        progress: ExtractionProgress | None = None,
+    ) -> ExtractedContent:
         """提取一篇已支持平台的文章。"""
 
         # URL 结构。
@@ -36,4 +40,4 @@ class ArticleExtractorRouter(ContentExtractorPort):
         extractor = self._extractors.get(hostname)
         if extractor is None:
             raise ValueError(f"暂不支持该文章平台: {hostname or '缺少主机名'}")
-        return extractor.extract(url)
+        return extractor.extract(url, progress)

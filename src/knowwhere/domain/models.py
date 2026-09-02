@@ -20,6 +20,18 @@ class ContentQuality(StrEnum):
     METADATA_ONLY = "metadata_only"
 
 
+# 内容类型用于统一文章、图文与视频的入库语义。
+class ContentType(StrEnum):
+    """归档内容类型。"""
+
+    # 普通网页文章。
+    ARTICLE = "article"
+    # 多张图片与配文组成的图文作品。
+    IMAGE_TEXT = "image_text"
+    # 以音视频转录为主要证据的视频作品。
+    VIDEO = "video"
+
+
 # 任务状态枚举表达可持久化阶段。
 class TaskStatus(StrEnum):
     """处理任务状态。"""
@@ -59,6 +71,8 @@ class ExtractedContent:
     published_at: datetime | None
     # 内容质量。
     quality: ContentQuality
+    # 归档内容类型；默认值保持现有文章提取器兼容。
+    content_type: ContentType = ContentType.ARTICLE
     # 平台作品或文章 ID，用于跨链接形式去重。
     platform_content_id: str | None = None
     # 提取警告。
@@ -137,6 +151,10 @@ class ProcessingTask:
     status: TaskStatus = TaskStatus.QUEUED
     # 当前失败信息。
     error_message: str | None = None
+    # 提取阶段中最近完成的检查点。
+    checkpoint_stage: str | None = None
+    # 检查点的无密钥结构化数据。
+    checkpoint_data: dict[str, object] = field(default_factory=dict)
     # 创建时间。
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     # 更新时间。
@@ -173,4 +191,12 @@ class ProcessingTask:
             raise ValueError(f"终态任务不能再次失败: {self.status}")
         self.status = TaskStatus.FAILED
         self.error_message = message[:1000]
+        self.updated_at = datetime.now(UTC)
+
+    # 保存可持久化的提取进度。
+    def checkpoint(self, stage: str, data: dict[str, object] | None = None) -> None:
+        """记录最近完成阶段及其安全元数据。"""
+
+        self.checkpoint_stage = stage
+        self.checkpoint_data = dict(data or {})
         self.updated_at = datetime.now(UTC)

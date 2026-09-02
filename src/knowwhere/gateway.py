@@ -22,6 +22,9 @@ SUPPORTED_ARTICLE_URL_PATTERN = re.compile(
     r"https://(?:"
     r"mp\.weixin\.qq\.com/[^\s<>\"']+|"
     r"(?:www\.)?juejin\.cn/post/\d+(?:\?[^\s<>\"']*)?|"
+    r"v\.douyin\.com/[A-Za-z0-9_-]+/?(?:\?[^\s<>\"']*)?|"
+    r"www\.douyin\.com/(?:video|note)/\d+(?:\?[^\s<>\"']*)?|"
+    r"www\.iesdouyin\.com/share/(?:video|note)/\d+/?(?:\?[^\s<>\"']*)?|"
     r"(?:www\.)?github\.com/[A-Za-z0-9][A-Za-z0-9-]{0,38}/"
     r"[A-Za-z0-9._-]{1,100}/?(?:[?#][^\s<>\"']*)?"
     r"(?![A-Za-z0-9._/-])"
@@ -174,8 +177,8 @@ class _MessageHandler:
         try:
             self._reply_client.reply_text(
                 message_id,
-                "知归已收到消息，但没有识别到微信公众号、稀土掘金文章或 GitHub 仓库链接。"
-                "请直接粘贴受支持的文章链接，或 https://github.com/所有者/仓库 链接。",
+                "知归已收到消息，但没有识别到微信公众号、稀土掘金、GitHub 或抖音链接。"
+                "请直接粘贴受支持的文章、仓库或抖音图文/视频链接。",
             )
         except Exception:
             return

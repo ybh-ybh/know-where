@@ -774,7 +774,7 @@ docs/
 | `KW_TENCENTCLOUD_APP_ID` | 腾讯云 AppId | 账号与 Bucket 核对 |
 | `KW_TENCENTCLOUD_SECRET_ID` | 密钥 | ASR/COS 首版共享的最小权限凭据 |
 | `KW_TENCENTCLOUD_SECRET_KEY` | 密钥 | 与 SecretId 配对，不得进入日志 |
-| `KW_TENCENT_ASR_ENGINE_MODEL_TYPE` | `16k_zh_en` | 腾讯云引擎类型，可配置且不写死在适配器 |
+| `KW_TENCENT_ASR_ENGINE_MODEL_TYPE` | `16k_zh` | 腾讯云引擎类型，可配置且不写死在适配器 |
 | `KW_ARCHIVE_WORKSPACE` | `feishu_managed` | 归档工作区初始化适配器 |
 | `KW_ARCHIVE_BOOTSTRAP_MODE` | `first_private_message` | 由首个可用范围内私聊用户完成个人绑定 |
 | `KW_EXTRACTOR_WECHAT` | `wechat_browser` | 微信公众号提取器 |

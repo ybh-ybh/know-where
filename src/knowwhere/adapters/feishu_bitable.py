@@ -420,7 +420,11 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             "原始链接": self._url_value(content.source_url, "查看原文"),
             "规范链接": self._url_value(content.canonical_url, "规范链接"),
             "平台": content.platform,
-            "内容类型": "文章",
+            "内容类型": {
+                "article": "文章",
+                "image_text": "图文",
+                "video": "视频",
+            }[content.content_type.value],
             "作者": content.author or "",
             "收藏时间": self._datetime_milliseconds(collected_at),
             READ_STATUS_FIELD: DEFAULT_READ_STATUS,

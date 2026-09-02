@@ -77,6 +77,19 @@ def test_extract_github_repository_url_from_text_message() -> None:
     assert extract_supported_url(content) == "https://github.com/Tencent/WeKnora"
 
 
+# 抖音分享短链应完整传给解析器。
+def test_extract_douyin_short_url_from_text_message() -> None:
+    """验证抖音图文或视频短链。"""
+
+    # 飞书文本消息 JSON。
+    content = json.dumps(
+        {"text": "请归档 https://v.douyin.com/UrtPieUOn5c/。"},
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == "https://v.douyin.com/UrtPieUOn5c/"
+
+
 # 非法 JSON 和非支持链接都不应触发任务。
 def test_ignore_unsupported_message() -> None:
     """验证消息过滤边界。"""

@@ -42,6 +42,8 @@ class SqlTaskRepository(TaskRepositoryPort):
             source_url=task.source_url,
             status=task.status.value,
             error_message=task.error_message,
+            checkpoint_stage=task.checkpoint_stage,
+            checkpoint_data=task.checkpoint_data,
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
@@ -59,6 +61,8 @@ class SqlTaskRepository(TaskRepositoryPort):
                 raise LookupError(f"任务不存在: {task.task_id}")
             row.status = task.status.value
             row.error_message = task.error_message
+            row.checkpoint_stage = task.checkpoint_stage
+            row.checkpoint_data = task.checkpoint_data
             row.updated_at = task.updated_at
 
     # 原子保存完成任务和内容结果。
@@ -97,6 +101,8 @@ class SqlTaskRepository(TaskRepositoryPort):
                 raise LookupError(f"任务不存在: {task.task_id}")
             task_row.status = task.status.value
             task_row.error_message = task.error_message
+            task_row.checkpoint_stage = task.checkpoint_stage
+            task_row.checkpoint_data = task.checkpoint_data
             task_row.updated_at = task.updated_at
             # 同 URL 内容只保留一个内部事实记录。
             content_row = session.scalar(
@@ -107,6 +113,11 @@ class SqlTaskRepository(TaskRepositoryPort):
                     content_id=content_id,
                     canonical_url=content.canonical_url,
                     title=content.title,
+                    platform=content.platform,
+                    platform_content_id=content.platform_content_id,
+                    content_type=content.content_type.value,
+                    author=content.author,
+                    published_at=content.published_at,
                     body_text=content.body_text,
                     content_hash=content_hash,
                     analysis=analysis_data,
@@ -119,6 +130,11 @@ class SqlTaskRepository(TaskRepositoryPort):
                 session.add(content_row)
             else:
                 content_row.title = content.title
+                content_row.platform = content.platform
+                content_row.platform_content_id = content.platform_content_id
+                content_row.content_type = content.content_type.value
+                content_row.author = content.author
+                content_row.published_at = content.published_at
                 content_row.body_text = content.body_text
                 content_row.content_hash = content_hash
                 content_row.analysis = analysis_data

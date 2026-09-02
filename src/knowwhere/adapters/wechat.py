@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from bs4 import BeautifulSoup
 
-from knowwhere.application.ports import ContentExtractorPort
+from knowwhere.application.ports import ContentExtractorPort, ExtractionProgress
 from knowwhere.domain.models import ContentQuality, ExtractedContent
 
 
@@ -34,7 +34,11 @@ class WeChatArticleExtractor(ContentExtractorPort):
         )
 
     # 下载并解析公开文章。
-    def extract(self, url: str) -> ExtractedContent:
+    def extract(
+        self,
+        url: str,
+        progress: ExtractionProgress | None = None,
+    ) -> ExtractedContent:
         """返回清洗后的完整正文。"""
 
         # 已校验的规范地址。

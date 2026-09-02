@@ -30,6 +30,10 @@ class TaskRow(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     # 安全错误摘要。
     error_message: Mapped[str | None] = mapped_column(Text)
+    # 最近完成的提取检查点。
+    checkpoint_stage: Mapped[str | None] = mapped_column(String(64))
+    # 检查点无密钥数据。
+    checkpoint_data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     # 创建时间。
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     # 更新时间。
@@ -49,6 +53,16 @@ class ContentRow(Base):
     canonical_url: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     # 标题。
     title: Mapped[str] = mapped_column(Text, nullable=False)
+    # 来源平台。
+    platform: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 平台作品标识。
+    platform_content_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    # 统一内容类型。
+    content_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # 作者名称。
+    author: Mapped[str | None] = mapped_column(Text)
+    # 来源发布时间。
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 完整正文。
     body_text: Mapped[str] = mapped_column(Text, nullable=False)
     # 内容哈希。
