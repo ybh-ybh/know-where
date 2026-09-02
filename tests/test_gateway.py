@@ -90,6 +90,34 @@ def test_extract_douyin_short_url_from_text_message() -> None:
     assert extract_supported_url(content) == "https://v.douyin.com/UrtPieUOn5c/"
 
 
+# B站标准视频地址及分P参数应完整传给解析器。
+def test_extract_bilibili_video_url_from_text_message() -> None:
+    """验证B站标准视频链接。"""
+
+    # 飞书文本消息 JSON。
+    content = json.dumps(
+        {"text": "请归档 https://www.bilibili.com/video/BV19v8x6uEh8/?p=1。"},
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == (
+        "https://www.bilibili.com/video/BV19v8x6uEh8/?p=1"
+    )
+
+
+# B站分享短链应完整传给安全跳转解析器。
+def test_extract_bilibili_short_url_from_text_message() -> None:
+    """验证 b23.tv 分享短链。"""
+
+    # 飞书文本消息 JSON。
+    content = json.dumps(
+        {"text": "看看这个 https://b23.tv/Abc_123。"},
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == "https://b23.tv/Abc_123"
+
+
 # 非法 JSON 和非支持链接都不应触发任务。
 def test_ignore_unsupported_message() -> None:
     """验证消息过滤边界。"""

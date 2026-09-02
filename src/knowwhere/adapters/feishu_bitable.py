@@ -93,7 +93,11 @@ FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
     FieldDefinition(CONTENT_ID_FIELD, 1),
     FieldDefinition("原始链接", 15),
     FieldDefinition("规范链接", 15),
-    FieldDefinition("平台", 3, ("微信公众号", "掘金", "GitHub", "小红书", "抖音", "其他网页")),
+    FieldDefinition(
+        "平台",
+        3,
+        ("微信公众号", "掘金", "GitHub", "小红书", "抖音", "B站", "其他网页"),
+    ),
     FieldDefinition("平台内容 ID", 1),
     FieldDefinition("内容类型", 3, ("文章", "图文", "视频", "未知")),
     FieldDefinition("作者", 1),

@@ -147,6 +147,7 @@ flowchart LR
     ER --> CRAWL[Crawl4AI 容器]
     ER --> XHS[小红书适配器]
     ER --> DY[抖音适配器]
+    ER --> BL[B站适配器]
     ASR --> TASR[腾讯云录音文件识别]
     ASR --> FW[faster-whisper 容器]
     LLM --> OAI[OpenAI 兼容接口]
@@ -441,9 +442,12 @@ ASR 供应商不负责长视频业务流程。核心 `TranscriptionOrchestrator`
 | 稀土掘金 | 公开页面/API 适配器 | 通用 Crawl4AI |
 | 小红书 | 独立适配器服务 | 云解析 API 或受控浏览器适配器 |
 | 抖音 | 独立适配器服务 | 云解析 API 或受控浏览器适配器 |
+| B站 | 公开元数据与 DASH 音频适配器 | 外部工具适配器或受控浏览器 |
 | 其他网页 | Crawl4AI HTTP 适配器 | 自建 Playwright/Readability |
 
 [Crawl4AI](https://github.com/unclecode/crawl4ai) 提供异步浏览器、动态页面和 Markdown 输出，并有 Docker 服务形态，适合放在独立适配器容器中，而不是把其对象暴露到应用层。
+
+B站当前只把视频语音作为总结事实输入：适配器通过公开详情接口取得 BV/CID/分P元数据，再从 DASH 音轨中选择最高带宽的匿名可访问轨道；流式 GET 失败时依次回退同轨 `backupUrl`。CDN 不保证正确响应 HEAD 请求，因此健康判断不能用 HEAD 替代真实 GET。音频 URL 具有时效性，只能用于当前提取调用，不进入检查点或持久化结果。
 
 ### 8.3 平台工具许可证边界
 

@@ -38,6 +38,8 @@ CONFIG_KEYS = (
     "KW_DOUYIN_MAX_IMAGE_BYTES",
     "KW_DOUYIN_MAX_VIDEO_BYTES",
     "KW_DOUYIN_MAX_IMAGES",
+    "KW_BILIBILI_REQUEST_TIMEOUT_SECONDS",
+    "KW_BILIBILI_MAX_AUDIO_BYTES",
     "KW_FFMPEG_PATH",
 )
 
@@ -164,6 +166,42 @@ def test_env_file_loads_independent_vision_model(
     assert settings.vision is not None
     assert settings.vision.model == "glm-4.6v"
     assert settings.vision.base_url == "https://open.bigmodel.cn/api/paas/v4"
+
+
+# B站使用独立请求与音频资源限制，并复用全局 FFmpeg 路径。
+def test_env_file_loads_bilibili_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证B站媒体配置从扁平环境变量加载。"""
+
+    for key in CONFIG_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    # 包含B站限制的最小环境文件。
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "KW_FEISHU_APP_ID=cli_test",
+                "KW_FEISHU_APP_SECRET=feishu-secret",
+                "KW_LLM_API_KEY=llm-secret",
+                "KW_LLM_BASE_URL=https://llm.example/v1",
+                "KW_LLM_MODEL=text-model",
+                "KW_BILIBILI_REQUEST_TIMEOUT_SECONDS=90",
+                "KW_BILIBILI_MAX_AUDIO_BYTES=12345678",
+                "KW_FFMPEG_PATH=C:/tools/ffmpeg.exe",
+                "KW_DATABASE_URL=postgresql+psycopg://localhost/knowwhere",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    # 已校验配置。
+    settings = AppSettings.load(env_file)
+
+    assert settings.bilibili.request_timeout_seconds == 90
+    assert settings.bilibili.max_audio_bytes == 12_345_678
+    assert settings.bilibili.ffmpeg_path == "C:/tools/ffmpeg.exe"
 
 
 # 无效 LLM 地址必须在启动配置阶段失败，而不是等到首次付费请求。

@@ -199,6 +199,22 @@ class DouyinSettings(BaseModel):
     ffmpeg_path: str = "ffmpeg"
 
 
+# B站媒体下载和本地音频标准化配置。
+class BilibiliSettings(BaseModel):
+    """B站公开视频处理限制。"""
+
+    # 页面、接口和媒体请求超时。
+    request_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    # 单个 DASH 音频文件最大字节数；这是资源保护而非视频时长限制。
+    max_audio_bytes: int = Field(
+        default=2 * 1024 * 1024 * 1024,
+        ge=1024,
+        le=20 * 1024 * 1024 * 1024,
+    )
+    # FFmpeg 可执行文件名或绝对路径。
+    ffmpeg_path: str = "ffmpeg"
+
+
 # 应用完整配置快照。
 class AppSettings(BaseModel):
     """知归运行配置。"""
@@ -213,6 +229,8 @@ class AppSettings(BaseModel):
     vision: VisionModelSettings | None = None
     # 抖音媒体下载限制与工具路径。
     douyin: DouyinSettings = Field(default_factory=DouyinSettings)
+    # B站媒体下载限制与工具路径。
+    bilibili: BilibiliSettings = Field(default_factory=BilibiliSettings)
     # PostgreSQL 连接地址；必须由环境提供，禁止在代码中设置凭据默认值。
     database_url: str
 
@@ -301,6 +319,15 @@ class AppSettings(BaseModel):
                     "KW_DOUYIN_MAX_VIDEO_BYTES", str(4 * 1024 * 1024 * 1024)
                 ),
                 "max_images": values.get("KW_DOUYIN_MAX_IMAGES", "30"),
+                "ffmpeg_path": values.get("KW_FFMPEG_PATH", "ffmpeg"),
+            },
+            "bilibili": {
+                "request_timeout_seconds": values.get(
+                    "KW_BILIBILI_REQUEST_TIMEOUT_SECONDS", "60"
+                ),
+                "max_audio_bytes": values.get(
+                    "KW_BILIBILI_MAX_AUDIO_BYTES", str(2 * 1024 * 1024 * 1024)
+                ),
                 "ffmpeg_path": values.get("KW_FFMPEG_PATH", "ffmpeg"),
             },
             "database_url": database_url,

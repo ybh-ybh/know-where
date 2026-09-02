@@ -2,7 +2,7 @@
 
 让散落的信息各归其位。
 
-知归是一个仅供个人使用的 AI 信息归档工具。当前支持把公开微信公众号、稀土掘金文章、GitHub 仓库和抖音图文/视频发送给飞书机器人，自动提取正文、README、逐图视觉正文或视频转录，调用 OpenAI 兼容模型生成分类与摘要，并归档到系统创建的飞书多维表格。
+知归是一个仅供个人使用的 AI 信息归档工具。当前支持把公开微信公众号、稀土掘金文章、GitHub 仓库、抖音图文/视频和 B站视频发送给飞书机器人，自动提取正文、README、逐图视觉正文或视频转录，调用 OpenAI 兼容模型生成分类与摘要，并归档到系统创建的飞书多维表格。
 
 ## 当前能力
 
@@ -15,6 +15,7 @@
 - 抖音分享短链还原、A-Bogus 作品详情解析，以及图文/视频事实字段分流。
 - 抖音图文全部图片经私有 COS 短时 URL 交给 GLM-4.6V 做有序 OCR 和视觉理解。
 - 抖音视频经 FFmpeg 标准化为单声道 16k MP3，并按 4 小时切成腾讯单任务安全分段，再由腾讯云录音文件识别顺序转录。
+- B站标准链接、`b23.tv` 分享短链和分P解析；匿名获取公开元数据与 DASH 音频，按带宽选择音轨并在 CDN 失败时回退备用地址。
 - COS 临时对象在成功和失败路径都会清理；任务保存无密钥阶段检查点。
 - AI 同步生成简短标题、分类、标签与摘要，飞书同时保留未经改写的原始标题。
 - 飞书提供“阅读状态”和默认留空的“阅读时间”字段。
@@ -28,23 +29,30 @@
 
 ```text
 飞书私聊 / CLI
-  → 内容平台分派器（微信 / 掘金 / GitHub / 抖音）
+  → 内容平台分派器（微信 / 掘金 / GitHub / 抖音 / B站）
   → 抖音图文：全部图片 → 私有 COS → GLM 视觉正文 → 清理
   → 抖音视频：视频 → FFmpeg 音频 → 私有 COS → 腾讯 ASR → 清理
+  → B站视频：DASH 音频 → FFmpeg 标准音频 → 私有 COS → 腾讯 ASR → 清理
   → 飞书分类目录
   → OpenAI 兼容 LLM
   → 飞书多维表格
   → PostgreSQL 完成快照
 ```
 
-业务流水线只依赖稳定端口。抖音提取器通过 `ArtifactStorePort`、`VisionProviderPort` 和 `AsrProviderPort` 使用外部能力；供应商选择集中在 `composition.py`，切换实现时不修改状态机。
+业务流水线只依赖稳定端口。抖音和 B站提取器通过 `ArtifactStorePort`、`VisionProviderPort` 和 `AsrProviderPort` 使用外部能力；供应商选择集中在 `composition.py`，切换实现时不修改状态机。
+
+### B站媒体提取策略
+
+B站适配器先通过公开 `view` 接口取得 BV、CID、标题、UP 主、简介、发布时间和分P，再通过网页 `playurl` 接口读取 DASH 音轨。当前产品只用视频语音作为总结证据，因此直接流式下载最高带宽的匿名音轨并交给 FFmpeg，而不额外下载视频画面；主 CDN 请求失败时按接口返回的 `backupUrl` 顺序回退。短期媒体 URL 只存在于单次提取过程，不写入数据库。
+
+如果未来需要视频画面理解或导出视频文件，应同时下载 DASH 视频轨和音频轨，再用 FFmpeg 无损封装；不能把单独的视频轨当成带声音的完整视频。实现选择参考了 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 的 Bilibili 提取器设计，但本项目没有引入或复制其代码。
 
 ## 准备配置
 
 1. 安装 Python 3.12、[uv](https://docs.astral.sh/uv/) 和 Docker Desktop。
 2. 复制 `.env.example` 为 `.env`。
 3. 填入用户自建 PostgreSQL、飞书和一个 OpenAI 兼容 LLM 的必填配置。
-4. 抖音视频填写腾讯云 COS/ASR 配置；抖音图文还需填写独立的 `KW_VISION_*` 配置。
+4. 抖音和 B站视频填写腾讯云 COS/ASR 配置；抖音图文还需填写独立的 `KW_VISION_*` 配置。
 5. 确认飞书应用已经发布、启用机器人能力，并订阅 `im.message.receive_v1` 事件。
 
 `.env` 已被 Git 和 Docker 构建上下文忽略。不要把真实密钥写进镜像、日志、提交、Issue 或问题截图。Docker Compose 通过 `env_file` 在运行时注入配置，不把密钥复制进镜像。
@@ -66,6 +74,7 @@ uv run knowwhere process "https://mp.weixin.qq.com/s/文章ID"
 uv run knowwhere process "https://juejin.cn/post/文章ID"
 uv run knowwhere process "https://github.com/Tencent/WeKnora"
 uv run knowwhere process "https://v.douyin.com/抖音分享码/"
+uv run knowwhere process "https://www.bilibili.com/video/BV19v8x6uEh8/"
 ```
 
 默认读取根目录 `.env`；需要使用其他文件时，可为命令传入 `--env-file 路径`。进程环境变量的优先级高于文件值，便于容器或密钥管理服务覆盖。
@@ -90,7 +99,7 @@ docker compose --profile gateway up -d gateway
 docker compose --profile gateway ps
 ```
 
-此时把公开微信公众号、稀土掘金文章、GitHub 仓库或抖音图文/视频链接私聊发送给机器人即可。Gateway 会先回复“已收到”，完成后回复飞书记录链接。
+此时把公开微信公众号、稀土掘金文章、GitHub 仓库、抖音图文/视频或 B站视频链接私聊发送给机器人即可。Gateway 会先回复“已收到”，完成后回复飞书记录链接。
 
 容器内手工处理一篇文章：
 
@@ -112,7 +121,7 @@ docker compose --profile gateway down
 ```text
 src/knowwhere/domain/          领域对象与状态机
 src/knowwhere/application/     端口和处理流水线
-src/knowwhere/adapters/        微信、掘金、GitHub、抖音、COS、视觉、ASR、LLM 与飞书适配器
+src/knowwhere/adapters/        微信、掘金、GitHub、抖音、B站、COS、视觉、ASR、LLM 与飞书适配器
 src/knowwhere/infrastructure/  PostgreSQL 映射与仓储
 alembic/                       数据库迁移
 tests/                         离线回归测试

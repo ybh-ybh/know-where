@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from knowwhere.adapters.article_router import ArticleExtractorRouter
+from knowwhere.adapters.bilibili import (
+    BilibiliContentExtractor,
+    BilibiliMediaDownloader,
+    BilibiliWebResolver,
+)
 from knowwhere.adapters.cos_artifact_store import TencentCosArtifactStore
 from knowwhere.adapters.douyin import (
     DouyinContentExtractor,
@@ -94,11 +99,24 @@ def build_runtime(config_path: Path | None = None) -> Runtime:
             vision=vision,
             audio_extractor=FfmpegAudioExtractor(settings.douyin.ffmpeg_path),
         )
+        # B站公开视频提取器直接下载 DASH 音频并复用现有转录端口。
+        bilibili_extractor = BilibiliContentExtractor(
+            settings=settings.bilibili,
+            resolver=BilibiliWebResolver(settings.bilibili),
+            downloader=BilibiliMediaDownloader(settings.bilibili),
+            artifact_store=artifact_store,
+            asr=asr,
+            audio_extractor=FfmpegAudioExtractor(settings.bilibili.ffmpeg_path),
+        )
         extractors.update(
             {
                 "v.douyin.com": douyin_extractor,
                 "www.iesdouyin.com": douyin_extractor,
                 "www.douyin.com": douyin_extractor,
+                "bilibili.com": bilibili_extractor,
+                "www.bilibili.com": bilibili_extractor,
+                "m.bilibili.com": bilibili_extractor,
+                "b23.tv": bilibili_extractor,
             }
         )
     # 内容平台分派器是应用层看到的唯一内容提取端口。
