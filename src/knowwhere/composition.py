@@ -18,11 +18,13 @@ from knowwhere.adapters.douyin import (
     DouyinWebResolver,
     FfmpegAudioExtractor,
 )
+from knowwhere.adapters.faster_whisper_asr import FasterWhisperAsrProvider
 from knowwhere.adapters.feishu_bitable import FeishuBitableAdapter
 from knowwhere.adapters.github import GitHubReadmeExtractor
 from knowwhere.adapters.glm_vision import GlmVisionProvider
 from knowwhere.adapters.juejin import JuejinArticleExtractor
 from knowwhere.adapters.llm_openai import PromptFirstOpenAiCompatibleLlm
+from knowwhere.adapters.local_temp_storage import LocalTempWorkspaceFactory
 from knowwhere.adapters.tencent_asr import TencentFileAsrProvider
 from knowwhere.adapters.wechat import WeChatArticleExtractor
 from knowwhere.adapters.xiaohongshu import (
@@ -30,7 +32,9 @@ from knowwhere.adapters.xiaohongshu import (
     XiaohongshuMediaDownloader,
     XiaohongshuWebResolver,
 )
+from knowwhere.application.media import AudioTranscriptionService
 from knowwhere.application.pipeline import MvpPipeline, PipelineDependencies
+from knowwhere.application.ports import AsrProviderPort
 from knowwhere.config import AppSettings
 from knowwhere.infrastructure.database import Database
 from knowwhere.infrastructure.repositories import SqlTaskRepository, SqlWorkspaceBindingStore
@@ -87,57 +91,72 @@ def build_runtime(config_path: Path | None = None) -> Runtime:
         "github.com": github_extractor,
         "www.github.com": github_extractor,
     }
-    if settings.tencentcloud is not None:
+    # 可配置的本地下载和 FFmpeg 工作目录。
+    temp_workspaces = LocalTempWorkspaceFactory(settings.temp_storage)
+    # 当前配置选择的供应商无关 ASR 端口。
+    asr: AsrProviderPort
+    if settings.asr_provider == "tencent":
+        if settings.tencentcloud is None:
+            raise ValueError("腾讯 ASR 缺少已校验的腾讯云配置")
         # 私有 COS 临时对象存储。
         artifact_store = TencentCosArtifactStore(settings.tencentcloud)
-        # 腾讯云录音文件识别。
-        asr = TencentFileAsrProvider(settings.tencentcloud)
-        # 图文视觉模型在未配置时由抖音提取器给出精确错误。
-        vision = GlmVisionProvider(settings.vision) if settings.vision is not None else None
-        # 抖音公开图文与视频提取器。
-        douyin_extractor = DouyinContentExtractor(
-            settings=settings.douyin,
-            resolver=DouyinWebResolver(settings.douyin),
-            downloader=DouyinMediaDownloader(settings.douyin),
-            artifact_store=artifact_store,
-            asr=asr,
-            vision=vision,
-            audio_extractor=FfmpegAudioExtractor(settings.douyin.ffmpeg_path),
+        # 腾讯云录音文件识别内部独占 COS 中转逻辑。
+        asr = TencentFileAsrProvider(
+            settings.tencentcloud,
+            artifact_store,
+            delete_after_process=settings.temp_storage.delete_after_process,
         )
-        # B站公开视频提取器直接下载 DASH 音频并复用现有转录端口。
-        bilibili_extractor = BilibiliContentExtractor(
-            settings=settings.bilibili,
-            resolver=BilibiliWebResolver(settings.bilibili),
-            downloader=BilibiliMediaDownloader(settings.bilibili),
-            artifact_store=artifact_store,
-            asr=asr,
-            audio_extractor=FfmpegAudioExtractor(settings.bilibili.ffmpeg_path),
-        )
-        # 小红书图文和视频复用抖音已验证的视觉、FFmpeg、COS 与 ASR 能力。
-        xiaohongshu_extractor = XiaohongshuContentExtractor(
-            settings=settings.xiaohongshu,
-            resolver=XiaohongshuWebResolver(settings.xiaohongshu),
-            downloader=XiaohongshuMediaDownloader(settings.xiaohongshu),
-            artifact_store=artifact_store,
-            asr=asr,
-            vision=vision,
-            audio_extractor=FfmpegAudioExtractor(settings.xiaohongshu.ffmpeg_path),
-        )
-        extractors.update(
-            {
-                "v.douyin.com": douyin_extractor,
-                "www.iesdouyin.com": douyin_extractor,
-                "www.douyin.com": douyin_extractor,
-                "bilibili.com": bilibili_extractor,
-                "www.bilibili.com": bilibili_extractor,
-                "m.bilibili.com": bilibili_extractor,
-                "b23.tv": bilibili_extractor,
-                "xiaohongshu.com": xiaohongshu_extractor,
-                "www.xiaohongshu.com": xiaohongshu_extractor,
-                "xhslink.cn": xiaohongshu_extractor,
-                "xhslink.com": xiaohongshu_extractor,
-            }
-        )
+    else:
+        # 本地实现延迟加载模型且不构造任何腾讯客户端。
+        asr = FasterWhisperAsrProvider(settings.faster_whisper)
+    # 三个平台共用的音频分段转录编排。
+    transcriber = AudioTranscriptionService(asr)
+    # 图文视觉模型在未配置时由平台提取器给出精确错误。
+    vision = GlmVisionProvider(settings.vision) if settings.vision is not None else None
+    # 抖音公开图文与视频提取器。
+    douyin_extractor = DouyinContentExtractor(
+        settings=settings.douyin,
+        resolver=DouyinWebResolver(settings.douyin),
+        downloader=DouyinMediaDownloader(settings.douyin),
+        transcriber=transcriber,
+        vision=vision,
+        audio_extractor=FfmpegAudioExtractor(settings.douyin.ffmpeg_path),
+        temp_workspaces=temp_workspaces,
+    )
+    # B站公开视频提取器直接下载 DASH 音频并复用统一转录服务。
+    bilibili_extractor = BilibiliContentExtractor(
+        settings=settings.bilibili,
+        resolver=BilibiliWebResolver(settings.bilibili),
+        downloader=BilibiliMediaDownloader(settings.bilibili),
+        transcriber=transcriber,
+        audio_extractor=FfmpegAudioExtractor(settings.bilibili.ffmpeg_path),
+        temp_workspaces=temp_workspaces,
+    )
+    # 小红书图文和视频复用视觉、FFmpeg 与统一 ASR 能力。
+    xiaohongshu_extractor = XiaohongshuContentExtractor(
+        settings=settings.xiaohongshu,
+        resolver=XiaohongshuWebResolver(settings.xiaohongshu),
+        downloader=XiaohongshuMediaDownloader(settings.xiaohongshu),
+        transcriber=transcriber,
+        vision=vision,
+        audio_extractor=FfmpegAudioExtractor(settings.xiaohongshu.ffmpeg_path),
+        temp_workspaces=temp_workspaces,
+    )
+    extractors.update(
+        {
+            "v.douyin.com": douyin_extractor,
+            "www.iesdouyin.com": douyin_extractor,
+            "www.douyin.com": douyin_extractor,
+            "bilibili.com": bilibili_extractor,
+            "www.bilibili.com": bilibili_extractor,
+            "m.bilibili.com": bilibili_extractor,
+            "b23.tv": bilibili_extractor,
+            "xiaohongshu.com": xiaohongshu_extractor,
+            "www.xiaohongshu.com": xiaohongshu_extractor,
+            "xhslink.cn": xiaohongshu_extractor,
+            "xhslink.com": xiaohongshu_extractor,
+        }
+    )
     # 内容平台分派器是应用层看到的唯一内容提取端口。
     extractor = ArticleExtractorRouter(extractors)
     # 端口依赖集合。

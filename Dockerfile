@@ -3,7 +3,9 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    KW_TEMP_LOCAL_ROOT=/var/lib/knowwhere/temp \
+    KW_FASTER_WHISPER_MODEL_DIR=/var/lib/knowwhere/models
 
 WORKDIR /app
 
@@ -14,7 +16,9 @@ RUN apt-get update && \
     apt-get install --no-install-recommends --yes ffmpeg && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --system knowwhere && \
-    useradd --system --gid knowwhere --home-dir /app knowwhere
+    useradd --system --gid knowwhere --home-dir /app knowwhere && \
+    mkdir --parents /var/lib/knowwhere/temp /var/lib/knowwhere/models && \
+    chown --recursive knowwhere:knowwhere /var/lib/knowwhere
 
 COPY pyproject.toml uv.lock README.md ./
 COPY LICENSE THIRD_PARTY_NOTICES.md ./

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 # 默认本地环境文件；容器也可以只注入进程环境变量。
 DEFAULT_ENV_FILE = Path(".env")
@@ -113,6 +114,44 @@ class TencentCloudSettings(BaseModel):
         """兼容腾讯云控制台常见的纯数字 AppId。"""
 
         return str(value) if value is not None else value
+
+
+# 临时媒体文件和供应商中转对象的生命周期配置。
+class TempStorageSettings(BaseModel):
+    """配置临时产物存储位置和清理策略。"""
+
+    # 提交给 ASR 的临时产物存储实现。
+    provider: Literal["local", "tencent_cos"] = "local"
+    # 下载、FFmpeg 和本地 ASR 共用的本地工作目录。
+    local_root: Path = Field(
+        default_factory=lambda: Path(tempfile.gettempdir()) / "knowwhere"
+    )
+    # 任务成功或失败后是否删除临时产物。
+    delete_after_process: bool = True
+
+
+# faster-whisper 本地推理配置。
+class FasterWhisperSettings(BaseModel):
+    """配置不依赖第三方云服务的本地 ASR。"""
+
+    # Whisper 模型名称或已下载模型目录。
+    model: str = "small"
+    # 可选的独立模型缓存目录，不参与临时文件清理。
+    model_dir: Path | None = None
+    # CTranslate2 推理设备。
+    device: Literal["auto", "cpu", "cuda"] = "cpu"
+    # CTranslate2 计算精度，default 会按设备选择。
+    compute_type: str = "int8"
+    # 识别语言；空值表示自动检测。
+    language: str | None = "zh"
+    # 是否过滤长静音片段。
+    vad_filter: bool = True
+    # Beam Search 宽度。
+    beam_size: int = Field(default=5, ge=1, le=10)
+    # CPU 推理线程数；0 表示使用运行时默认值。
+    cpu_threads: int = Field(default=0, ge=0, le=256)
+    # 是否允许首次运行自动下载模型。
+    allow_model_download: bool = True
 
 
 # 单个 OpenAI 兼容供应商配置。
@@ -243,6 +282,12 @@ class AppSettings(BaseModel):
     feishu: FeishuSettings
     # 腾讯云配置；文章 MVP 不启用视频能力时可以不配置。
     tencentcloud: TencentCloudSettings | None = None
+    # 当前 ASR 实现。
+    asr_provider: Literal["faster_whisper", "tencent"] = "faster_whisper"
+    # 临时产物位置与生命周期。
+    temp_storage: TempStorageSettings = Field(default_factory=TempStorageSettings)
+    # faster-whisper 本地实现参数。
+    faster_whisper: FasterWhisperSettings = Field(default_factory=FasterWhisperSettings)
     # 唯一启用的 OpenAI 兼容 LLM 配置。
     llm: LlmProviderSettings
     # 图文视觉模型；未配置时文章与视频仍可运行。
@@ -255,6 +300,20 @@ class AppSettings(BaseModel):
     bilibili: BilibiliSettings = Field(default_factory=BilibiliSettings)
     # PostgreSQL 连接地址；必须由环境提供，禁止在代码中设置凭据默认值。
     database_url: str
+
+    # 在启动阶段拒绝无法工作的 ASR 与存储组合。
+    @model_validator(mode="after")
+    def validate_media_provider_pair(self) -> AppSettings:
+        """保证腾讯 ASR 只能通过腾讯 COS 中转。"""
+
+        if self.asr_provider == "tencent":
+            if self.tencentcloud is None:
+                raise ValueError("KW_ASR_PROVIDER=tencent 时必须完整配置腾讯云 ASR/COS")
+            if self.temp_storage.provider != "tencent_cos":
+                raise ValueError("腾讯云 ASR 只能搭配 KW_TEMP_STORAGE_PROVIDER=tencent_cos")
+        elif self.temp_storage.provider != "local":
+            raise ValueError("faster-whisper 首版只能搭配 KW_TEMP_STORAGE_PROVIDER=local")
+        return self
 
     # 读取 .env 并叠加进程环境变量。
     @classmethod
@@ -302,6 +361,14 @@ class AppSettings(BaseModel):
                     ),
                 },
             }
+        # 显式配置优先；旧环境存在腾讯配置时继续沿用腾讯路径，避免升级后静默改行为。
+        asr_provider = _optional_value(values, "KW_ASR_PROVIDER") or (
+            "tencent" if tencentcloud_data is not None else "faster_whisper"
+        )
+        # 临时存储与旧腾讯配置使用相同兼容推导，新增部署默认使用本地。
+        temp_storage_provider = _optional_value(values, "KW_TEMP_STORAGE_PROVIDER") or (
+            "tencent_cos" if asr_provider == "tencent" else "local"
+        )
         # 视觉模型变量；任一项存在时要求三项完整。
         vision_keys = ("KW_VISION_API_KEY", "KW_VISION_BASE_URL", "KW_VISION_MODEL")
         # 视觉模型配置数据。
@@ -321,6 +388,29 @@ class AppSettings(BaseModel):
                 "app_secret": values.get("KW_FEISHU_APP_SECRET"),
             },
             "tencentcloud": tencentcloud_data,
+            "asr_provider": asr_provider,
+            "temp_storage": {
+                "provider": temp_storage_provider,
+                "local_root": values.get(
+                    "KW_TEMP_LOCAL_ROOT", str(Path(tempfile.gettempdir()) / "knowwhere")
+                ),
+                "delete_after_process": values.get(
+                    "KW_TEMP_DELETE_AFTER_PROCESS", "true"
+                ),
+            },
+            "faster_whisper": {
+                "model": values.get("KW_FASTER_WHISPER_MODEL", "small"),
+                "model_dir": _optional_value(values, "KW_FASTER_WHISPER_MODEL_DIR"),
+                "device": values.get("KW_FASTER_WHISPER_DEVICE", "cpu"),
+                "compute_type": values.get("KW_FASTER_WHISPER_COMPUTE_TYPE", "int8"),
+                "language": values.get("KW_FASTER_WHISPER_LANGUAGE", "zh") or None,
+                "vad_filter": values.get("KW_FASTER_WHISPER_VAD_FILTER", "true"),
+                "beam_size": values.get("KW_FASTER_WHISPER_BEAM_SIZE", "5"),
+                "cpu_threads": values.get("KW_FASTER_WHISPER_CPU_THREADS", "0"),
+                "allow_model_download": values.get(
+                    "KW_FASTER_WHISPER_ALLOW_MODEL_DOWNLOAD", "true"
+                ),
+            },
             "llm": {
                 "api_key": values.get("KW_LLM_API_KEY"),
                 "base_url": values.get("KW_LLM_BASE_URL"),

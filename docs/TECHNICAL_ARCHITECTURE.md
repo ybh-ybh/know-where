@@ -31,10 +31,10 @@
 4. 使用 **PostgreSQL 作为内部事实源和持久任务后端**：飞书多维表格是用户可见归档投影，不承担任务恢复职责。
 5. 首版 **不引入 Redis/Celery**：任务量低，PostgreSQL 租约队列已满足持久化、并发领取、重试和恢复；未来可替换为 Celery、Temporal 或云队列。
 6. ASR、LLM、内容提取、消息入口、归档、全文存储、临时文件存储均定义独立端口。
-7. 首版默认 ASR 为腾讯云录音文件识别；faster-whisper 作为可选本地容器保留，二者实现同一 ASR 操作契约。
+7. 默认 ASR 为进程内按需加载的 faster-whisper；腾讯云录音文件识别作为可选云适配器，二者实现同一 ASR 契约。
 8. 所有外部调用采用“至少一次执行 + 幂等写入”，不追求跨第三方系统无法实现的虚假“恰好一次”。
 9. 飞书归档工作区由系统在首次绑定时创建并版本化管理，资源 ID 持久化在 PostgreSQL；运行时不依赖用户手工维护外部 ID。
-10. 首版临时对象存储使用腾讯云 COS；本地卷只承担 FFmpeg 工作空间，跨阶段音频分段通过 `ArtifactStorePort` 写入私有 COS 并按状态机清理。
+10. 媒体处理默认使用隔离的本地临时目录，并在任务结束后清理；只有腾讯云 ASR 适配器会把音频写入私有 COS 作为短期中转。
 
 ---
 
@@ -51,7 +51,7 @@
 | LLM、ASR 厂商会更换 | 业务流程只依赖稳定输入输出契约，供应商差异停留在适配器内 |
 | 完整正文必须保存 | 多维表格容量不足时必须有全文存储端口，不能只保存摘要或截断文本 |
 | 多维表格由系统创建 | 首次绑定需要幂等资源初始化、Schema Migration、协作者授权和资源绑定恢复 |
-| 原始音视频不保留 | 本地工作文件和 COS 临时对象都需要生命周期管理，转录持久化后立即清理 |
+| 原始音视频默认不保留 | 本地工作文件和腾讯模式下的 COS 临时对象都按 `KW_TEMP_DELETE_AFTER_PROCESS` 管理生命周期，默认在处理结束后清理 |
 | 部署环境是 Docker | 浏览器、FFmpeg、ASR 模型和字体依赖必须在镜像或独立容器中可复现 |
 
 ### 1.2 核心矛盾
@@ -142,20 +142,21 @@ flowchart LR
     W --> CAT[分类目录端口]
     W --> REC[记录归档端口]
     W --> DOC[全文存储端口]
-    W --> BLOB[临时文件端口]
+    W --> VOL[本地任务工作目录]
 
     ER --> CRAWL[Crawl4AI 容器]
     ER --> XHS[小红书适配器]
     ER --> DY[抖音适配器]
     ER --> BL[B站适配器]
-    ASR --> TASR[腾讯云录音文件识别]
-    ASR --> FW[faster-whisper 容器]
+    ASR --> TA[腾讯 ASR 适配器]
+    ASR --> FW[进程内 faster-whisper]
     LLM --> OAI[OpenAI 兼容接口]
     REC --> BT[系统创建的飞书多维表格]
     DOC --> FD[飞书文档]
-    MP --> VOL[Docker 临时工作卷]
-    BLOB --> COS[腾讯云 COS 私有 Bucket]
+    MP --> VOL
+    TA --> COS[腾讯云 COS 私有 Bucket]
     COS -. 短期预签名 URL .-> TASR
+    TA --> TASR[腾讯云录音文件识别]
 ```
 
 ### 3.1 Docker 服务拓扑
@@ -166,22 +167,16 @@ flowchart LR
 | `worker` | 是 | 执行任务流水线和重试 | 否，状态写 PostgreSQL |
 | 用户自建 PostgreSQL | 外部必需 | 任务、内容索引、阶段检查点、Outbox、适配器绑定；不由 Compose 管理 | 是 |
 | `crawler` | 推荐 | Crawl4AI 浏览器抓取服务 | 否 |
-| `asr-local` | 可选 profile | faster-whisper 本地 ASR | 否，模型可缓存到卷 |
 | `xhs-adapter` | 可选 | 小红书工具封装为稳定内部协议 | 否 |
 | `douyin-adapter` | 可选 | 抖音工具封装为稳定内部协议 | 否 |
 
 `gateway` 与 `worker` 使用同一业务镜像，只改变启动命令。这样共享领域模型和用例，不复制业务逻辑。
 
-### 3.2 Compose Profile
+### 3.2 Compose 运行模式
 
-| Profile | 组合 | 使用场景 |
-| --- | --- | --- |
-| `core` | gateway、worker、crawler + 外部 PostgreSQL | 使用云 ASR 的最小部署 |
-| `local-asr-cpu` | core + CPU faster-whisper | 无 GPU 的本地转录 |
-| `local-asr-gpu` | core + GPU faster-whisper | NVIDIA GPU 本地转录 |
-| `platform-tools` | core + xhs-adapter + douyin-adapter | 使用本地平台工具 |
+当前 Compose 只用 `gateway` profile 控制飞书长连接进程；faster-whisper 已安装在同一业务镜像内，不需要独立 sidecar。`asr-models` 和 `media-temp` 分卷挂载，分别保存长期模型缓存和按策略清理的媒体工作文件。腾讯模式不增加容器，只通过环境变量启用云适配器。
 
-Docker Compose 负责应用服务、网络和临时卷，PostgreSQL 通过 `KW_DATABASE_URL` 接入并由用户独立运维；相关能力见 [Docker Compose 官方文档](https://docs.docker.com/compose/)。
+Docker Compose 负责应用服务、网络和两个本地卷，PostgreSQL 通过 `KW_DATABASE_URL` 接入并由用户独立运维；相关能力见 [Docker Compose 官方文档](https://docs.docker.com/compose/)。
 
 ---
 
@@ -232,13 +227,13 @@ Docker Compose 负责应用服务、网络和临时卷，PostgreSQL 通过 `KW_D
 | `MessageGatewayPort` | 规范消息、用户标识 | 接收事件、发送消息结果 | 飞书长连接 | 飞书 Webhook、Telegram、微信 | R1/R3 |
 | `ContentExtractorPort` | URL、认证配置引用 | `ExtractedContent` | 平台适配器 + Crawl4AI | Firecrawl、自建 Playwright、云解析 API | R1 |
 | `MediaProcessorPort` | 媒体引用、目标格式 | 规范音频、分段清单 | FFmpeg | GStreamer、云媒体处理 | R1 |
-| `AsrProviderPort` | 音频分段、语言和时间戳要求 | 标准 ASR 操作引用、状态和转录结果 | 腾讯云录音文件识别 | faster-whisper、OpenAI 兼容 ASR、阿里云、火山等 | R0/R1 |
+| `AsrProviderPort` | 本地音频路径 | 规范转录文本和警告 | faster-whisper | 腾讯云录音文件识别、OpenAI 兼容 ASR、阿里云、火山等 | R0/R1 |
 | `LlmProviderPort` | 消息、JSON Schema、模型能力要求 | 结构化 JSON | OpenAI 兼容适配器 | LiteLLM、Ollama、厂商 SDK | R0/R1 |
 | `CategoryCatalogPort` | 字段映射 | 当前分类集合与版本 | 飞书多维表格字段选项 | YAML、数据库、Notion | R1 |
 | `RecordArchivePort` | 统一归档记录、可选内联全文 | 外部记录引用 | 飞书多维表格 | Notion、Airtable、Karakeep、PostgreSQL UI | R1 |
 | `ArchiveWorkspacePort` | 工作区蓝图、所有者标识、Schema 版本 | 工作区、表、字段和视图绑定 | 飞书多维表格初始化器 | Notion Database、Airtable Base、预置资源适配器 | R1 |
 | `FullTextStorePort` | 完整 Markdown、内容 ID | 全文引用 | 飞书文档 | 本地 Markdown、S3/MinIO、Notion Page | R1 |
-| `ArtifactStorePort` | 临时二进制或文本流、生命周期和 URL 能力要求 | `ArtifactRef`、短期读取引用、删除结果 | 腾讯云 COS | Docker 本地卷、S3、MinIO、NAS | R1/R2 |
+| `ArtifactStorePort` | 供应商需要远程读取的临时二进制 | 短期读取引用和删除结果 | 腾讯云 COS（仅腾讯 ASR 内部使用） | S3、MinIO、其他云对象存储 | R1/R2 |
 | `TaskBackendPort` | 任务和阶段租约 | 可恢复任务流 | PostgreSQL 租约队列 | Celery/Redis、Temporal、云队列 | R2 |
 | `TaskRepositoryPort` | 领域任务对象 | 持久化任务对象 | SQLAlchemy/PostgreSQL | 其他 ORM、MySQL、SQLite | R2 |
 | `ClockPort` | 无 | 当前时间 | 系统时钟 | 测试时钟 | R0 |
@@ -254,17 +249,11 @@ Docker Compose 负责应用服务、网络和临时卷，PostgreSQL 通过 `KW_D
 6. 配置切换只发生在 Composition Root，新任务保存实际使用的适配器与模型快照。
 7. 常规自动重试使用原配置快照；人工“重新处理”可以选择当前新配置。
 
-### 5.2 临时对象存储契约
+### 5.2 临时存储契约
 
-`ArtifactStorePort` 不暴露 COS Bucket、SDK 响应或厂商异常，稳定能力为：
+平台提取器通过 `LocalTempWorkspaceFactory` 在 `KW_TEMP_LOCAL_ROOT` 下为每次处理创建隔离目录。下载、图片 Base64 编码、FFmpeg 提取和本地 ASR 都只接收该目录内的本地路径；`KW_TEMP_DELETE_AFTER_PROCESS=true` 时退出作用域即清理，设置为 `false` 时保留文件用于调试。
 
-1. `put(stream, metadata, retention)`：流式写入并返回 `ArtifactRef`，不得要求业务层先把完整文件读入内存。
-2. `open(artifact_ref)`：供本地媒体处理或替代 ASR 读取。
-3. `presign_get(artifact_ref, expires_at)`：能力可选；返回仅对指定对象和短时间有效的 HTTPS 读取引用。
-4. `delete(artifact_ref)`：幂等删除；对象已不存在也视为成功。
-5. `head(artifact_ref)`：读取大小、哈希、内容类型和存在性，用于上传完整性与清理核对。
-
-腾讯云实现使用私有 Bucket 和固定 `knowwhere-temp/` 前缀。对象键由内部任务 ID、分段 ID 和随机量生成，不含标题、作者、用户 ID 或原平台账号。共享 Bucket 的全局生命周期配置不由应用擅自覆盖；应用删除是主清理路径，前缀级生命周期规则仅作为用户显式配置的兜底。
+`ArtifactStorePort` 不再是媒体流水线的公共前置步骤，只作为“供应商必须通过 URL 拉取文件”时的适配器私有能力。腾讯云 ASR 使用私有 Bucket 和固定 `knowwhere-temp/` 前缀，上传当前音频、生成短期预签名 URL、取得识别结果后按同一删除策略清理。对象键由内部任务 ID 和随机量生成，不含标题、作者、用户 ID 或原平台账号。
 
 ---
 
@@ -272,87 +261,25 @@ Docker Compose 负责应用服务、网络和临时卷，PostgreSQL 通过 `KW_D
 
 ### 6.1 职责拆分
 
-ASR 供应商不负责长视频业务流程。核心 `TranscriptionOrchestrator` 负责：
-
-1. 获取媒体并校验格式。
-2. 通过 `MediaProcessorPort` 规范化为统一音频格式。
-3. 根据 ASR 能力和资源水位生成分段清单。
-4. 逐段调用 `AsrProviderPort`。
-5. 为每段写入检查点。
-6. 处理相邻分段重叠文本并按时间顺序合并。
-7. 持久化完整转录后清理原始媒体。
-
-因此切换 ASR 不会改变下载、分段、续跑、合并和归档逻辑。
+ASR 供应商不负责媒体下载、FFmpeg 规范化、片段排序或归档。平台提取器先在隔离工作目录内生成音频片段，再由 `AudioTranscriptionService` 顺序调用 `AsrProviderPort`、合并文本、汇总清理警告并上报片段进度。因此切换 ASR 不会改变平台下载、媒体处理和归档逻辑。
 
 ### 6.2 ASR 输入契约
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `request_id` | string | 是 | 幂等和日志关联 ID |
-| `audio_ref` | ArtifactRef | 是 | 供应商适配器可读取的音频引用 |
-| `audio_sha256` | string | 是 | 缓存、完整性和幂等依据 |
-| `format` | string | 是 | 规范格式，如 FLAC/WAV |
-| `start_ms` | integer | 是 | 当前分段在原视频中的开始时间 |
-| `duration_ms` | integer | 是 | 当前分段时长 |
-| `language_hint` | string/null | 否 | 语言提示，不强制供应商接受 |
-| `timestamps` | enum | 是 | `none`、`segment`、`word` |
-| `context_hint` | string/null | 否 | 上一段尾部短文本，用于连续性，不含业务指令 |
+稳定端口当前只接收 `audio_path: Path`。路径指向应用已经规范化的本地音频片段；语言、VAD、Beam Search 和计算设备属于适配器配置，不进入平台提取器。云适配器若需要 URL，必须在自身内部完成上传和签名。
 
 ### 6.3 ASR 操作与输出契约
 
-云 ASR 可能异步完成，稳定端口不得假设“一次 HTTP 响应直接返回全文”。统一操作契约为：
-
-1. `start(request)` 返回 `AsrOperationRef`；本地同步实现也返回一个立即完成的操作引用。
-2. `poll(operation_ref)` 返回 `pending`、`completed` 或 `failed`，完成时携带标准转录结果。
-3. 远端任务 ID、提交时间和供应商配置快照在首次响应后立即写入阶段检查点。
-4. 供应商不支持幂等提交且提交结果不确定时，不盲目重复提交；进入 `ASR_SUBMIT_UNCERTAIN`，经超时确认或人工重试后再产生新任务。
-
-`AsrOperationRef` 至少包含：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `provider_id` | string | 实际适配器 |
-| `operation_id` | string | 内部稳定操作 ID，不直接使用供应商任务 ID充当业务唯一键 |
-| `provider_task_ref` | string/null | 供应商任务引用，仅由对应适配器解释 |
-| `status` | enum | `pending`、`completed`、`failed` |
-| `submitted_at` | datetime | 提交时间，用于超时和有效期判断 |
-
-完成后的标准转录结果为：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `provider_id` | string | 实际适配器 |
-| `model` | string | 实际模型 |
-| `language` | string/null | 检测语言 |
-| `segments` | list | 按时间升序的文本分段 |
-| `segments[].start_ms` | integer | 相对于完整媒体的绝对时间 |
-| `segments[].end_ms` | integer | 相对于完整媒体的绝对时间 |
-| `segments[].text` | string | 分段文本 |
-| `segments[].confidence` | number/null | 供应商提供时映射，否则为空 |
-| `full_text` | string | 当前音频分段完整文本 |
-| `warnings` | list | 静音、低置信度、语言异常等 |
+稳定方法为 `transcribe(audio_path) -> AsrTranscription`，输出包含非空 `text` 和可选 `warnings`。faster-whisper 在该调用内同步迭代模型片段；腾讯适配器则把创建任务与轮询封装在该方法内部，不让供应商任务 ID 或 COS URL 穿透应用层。
 
 ### 6.4 ASR 能力描述
 
-每个 ASR 适配器声明：
-
-- 最大单请求文件大小。
-- 建议单段时长，而不是产品最大视频时长。
-- 支持的音频格式。
-- 是否支持分段或单词时间戳。
-- 是否支持语言自动识别和语言提示。
-- 是否支持幂等键、异步任务和回调。
-- 本地、云端及数据出境属性。
-
-核心根据能力选择分段大小，不根据供应商名称写分支。
+当前由 FFmpeg 统一生成单声道 16k MP3，并在进入 ASR 前完成大小与分段约束。后续若不同供应商需要不同格式或片段上限，应扩展内部能力模型，由媒体服务选择参数，不能在各平台适配器中按供应商名称分支。
 
 ### 6.5 默认与替代实现
 
-- 首版默认实现：`tencent_cloud_recognition` 适配器调用腾讯云 `CreateRecTask`，并通过 `DescribeTaskStatus` 轮询结果。接口是异步任务，结果在腾讯云侧只保留 24 小时，因此完成后必须立即规范化并持久化。
-- 首版提交方式：使用 `ArtifactStorePort` 把音频分段写入私有腾讯云 COS，生成短期预签名 HTTPS URL，并以 `SourceType=0` 提交。腾讯云文档当前限制单个 URL 音频不超过 5 小时、文件不超过 1GB；这是单次供应商请求限制，不是知归的视频总时长限制。
-- 小文件兼容路径：当对象存储不可用且分段编码后不超过 5MB 时，腾讯云适配器可以声明支持 `SourceType=1` Base64 直传；该路径是适配器内降级，不改变业务状态机。
-- 清理时序：ASR 取得并持久化该分段结果后删除对应 COS 对象；任务进入不可重试终态时也执行清理。删除失败写入独立清理任务，不阻塞已保存的转录但不得静默忽略。
-- 本地替代实现：独立 `asr-local` 容器运行 [faster-whisper](https://github.com/SYSTRAN/faster-whisper)，支持 CPU/GPU 配置；其项目声明支持 Python 3.9+、CPU/GPU 和时间戳等能力。
+- 默认实现：进程内按需加载 [faster-whisper](https://github.com/SYSTRAN/faster-whisper)，直接读取本地音频；模型目录与媒体临时目录分离，媒体清理不会删除模型缓存。
+- 云端实现：`tencent` 适配器接收相同的本地路径，在适配器内部上传私有 COS、生成短期预签名 URL，再调用 `CreateRecTask` 并轮询 `DescribeTaskStatus`。
+- 清理时序：腾讯 ASR 调用结束后按 `KW_TEMP_DELETE_AFTER_PROCESS` 删除 COS 对象；删除失败以转录警告返回，不丢弃已经得到的文本。
 - 其他云实现：每个厂商使用独立适配器，或实现 OpenAI 风格音频转录协议的通用适配器。
 - 配置切换：`KW_ASR_PROVIDER` 选择已经注册的适配器；切换不修改用例代码。
 - 模型缓存：本地模型卷与业务临时卷分离，清理媒体时不删除模型。
@@ -449,7 +376,7 @@ ASR 供应商不负责长视频业务流程。核心 `TranscriptionOrchestrator`
 
 B站当前只把视频语音作为总结事实输入：适配器通过公开详情接口取得 BV/CID/分P元数据，再从 DASH 音轨中选择最高带宽的匿名可访问轨道；流式 GET 失败时依次回退同轨 `backupUrl`。CDN 不保证正确响应 HEAD 请求，因此健康判断不能用 HEAD 替代真实 GET。音频 URL 具有时效性，只能用于当前提取调用，不进入检查点或持久化结果。
 
-小红书当前使用匿名公开页面路线：逐跳校验 `xhslink.cn`/`xhslink.com` 到官方详情页，从 `window.__INITIAL_STATE__` 的目标 `noteDetailMap` 读取字段。图文下载全部有序图片并复用视觉端口；视频选择最高分辨率流并复用 FFmpeg、COS 和 ASR 端口。页面访问令牌与 CDN 地址均为短期事实，只在单次调用内存中存在。
+小红书当前使用匿名公开页面路线：逐跳校验 `xhslink.cn`/`xhslink.com` 到官方详情页，从 `window.__INITIAL_STATE__` 的目标 `noteDetailMap` 读取字段。图文下载全部有序图片并通过 Base64 调用视觉端口；视频选择最高分辨率流并复用本地临时目录、FFmpeg 和 ASR 端口。页面访问令牌与 CDN 地址均为短期事实，只在单次调用内存中存在。
 
 ### 8.3 平台工具许可证边界
 
@@ -577,7 +504,7 @@ Gateway 在提交“已接收”Outbox 后立即唤醒 Dispatcher，以满足 3 
 ### 10.2 大文本与二进制
 
 - PostgreSQL 不长期保存原始音视频。
-- 处理中的媒体和音频分段保存在 `ArtifactStorePort`，数据库只保存引用和哈希。
+- 处理中的媒体和音频分段保存在任务隔离的本地临时目录；腾讯 ASR 模式另在 COS 创建短期中转对象，数据库不长期保存原始媒体。
 - 完整正文与转录成功写入飞书表格或飞书文档后，中间文本可按保留策略清理。
 - 重新分析时由 `ArchivedContentReader` 根据 `FullTextRef` 从表格字段或全文存储读取正文，而不是重新抓取原平台。
 
@@ -657,10 +584,10 @@ sequenceDiagram
 | 数据迁移 | Alembic | 与 SQLAlchemy 配套、迁移可审计 | 原生 SQL 迁移、Flyway；仅基础设施层 |
 | 任务后端 | PostgreSQL 租约队列 | 单事实源、无 Redis 双写、适合个人低并发和长任务 | Celery/Redis、Dramatiq、Temporal、云队列，实现 `TaskBackendPort` |
 | 飞书接入 | 官方 `lark-oapi` Python SDK 长连接 | 官方 SDK 封装 token、签名、事件和模型；[官方仓库](https://github.com/larksuite/oapi-sdk-python) | Webhook 或直接 HTTP API，替换 `MessageGatewayPort` |
-| 云 ASR | 腾讯云录音文件识别 + 官方 Python SDK | 与长音频异步任务匹配；支持直接音频数据或 URL；供应商限制通过能力描述隔离 | faster-whisper、OpenAI 兼容 ASR、其他云厂商，实现 `AsrProviderPort` |
+| 云 ASR | 腾讯云录音文件识别 + 官方 Python SDK | 作为可选适配器，在内部管理 COS 中转和异步轮询 | OpenAI 兼容 ASR、其他云厂商，实现 `AsrProviderPort` |
 | 通用网页抓取 | Crawl4AI 独立容器 | 动态浏览器、Markdown、Docker API；Apache-2.0 | Firecrawl、自建 Playwright、云解析 API |
 | 媒体处理 | FFmpeg CLI 适配器 | 格式覆盖广，适合音频规范化和切片 | GStreamer、PyAV、云媒体处理 |
-| 本地 ASR | faster-whisper 独立容器 | MIT，支持 CPU/GPU、量化和时间戳 | whisper.cpp、云 ASR、其他本地模型 |
+| 本地 ASR | faster-whisper 进程内按需加载 | MIT，支持 CPU/GPU、量化和时间戳；默认无需第三方云服务 | whisper.cpp、云 ASR、其他本地模型 |
 | LLM | `openai-python` 封装的 OpenAI 兼容适配器 | 自定义 base URL、类型定义完整 | 直接 HTTPX、LiteLLM、Ollama、厂商 SDK |
 | 配置 | pydantic-settings + 环境变量/挂载文件 | 类型校验，适合 Docker | Dynaconf、纯环境变量；只替换配置加载器 |
 | 日志 | 标准 logging + JSON Formatter | 依赖少，stdout 适合容器 | structlog、loguru；统一日志字段不变 |
@@ -731,7 +658,6 @@ src/knowwhere/
     └── cli.py
 
 services/
-├── asr_faster_whisper/
 ├── xhs_adapter/
 └── douyin_adapter/
 
@@ -776,7 +702,19 @@ docs/
 | `KW_LLM_MODEL` | 模型标识 | 不在代码中写死 |
 | `KW_LLM_TIMEOUT_SECONDS` | `180` | 单次生成读取超时 |
 | `KW_LLM_THINKING_MODE` | 空 | 可选非标准扩展，不支持时不发送 |
-| `KW_ASR_PROVIDER` | `tencent_cloud_recognition` | ASR 适配器 |
+| `KW_ASR_PROVIDER` | `faster_whisper` | ASR 适配器，可选 `tencent` |
+| `KW_TEMP_STORAGE_PROVIDER` | `local` | 临时存储模式；腾讯 ASR 必须设为 `tencent_cos` |
+| `KW_TEMP_LOCAL_ROOT` | 系统临时目录下的 `knowwhere` | 本地媒体工作目录 |
+| `KW_TEMP_DELETE_AFTER_PROCESS` | `true` | 处理结束后是否删除本地文件及腾讯模式的 COS 中转对象 |
+| `KW_FASTER_WHISPER_MODEL` | `small` | 本地 Whisper 模型名 |
+| `KW_FASTER_WHISPER_MODEL_DIR` | 空 | 可选模型缓存目录；Docker 默认 `/var/lib/knowwhere/models` |
+| `KW_FASTER_WHISPER_DEVICE` | `cpu` | 推理设备，可按运行环境改为 `cuda` |
+| `KW_FASTER_WHISPER_COMPUTE_TYPE` | `int8` | CTranslate2 计算类型 |
+| `KW_FASTER_WHISPER_LANGUAGE` | `zh` | 语言提示；空值或 `auto` 表示自动识别 |
+| `KW_FASTER_WHISPER_VAD_FILTER` | `true` | 是否启用语音活动检测 |
+| `KW_FASTER_WHISPER_BEAM_SIZE` | `5` | Beam search 宽度 |
+| `KW_FASTER_WHISPER_CPU_THREADS` | `0` | CPU 线程数，`0` 使用运行库默认值 |
+| `KW_FASTER_WHISPER_ALLOW_MODEL_DOWNLOAD` | `true` | 本地无模型时是否允许下载 |
 | `KW_TENCENTCLOUD_APP_ID` | 腾讯云 AppId | 账号与 Bucket 核对 |
 | `KW_TENCENTCLOUD_SECRET_ID` | 密钥 | ASR/COS 首版共享的最小权限凭据 |
 | `KW_TENCENTCLOUD_SECRET_KEY` | 密钥 | 与 SecretId 配对，不得进入日志 |
@@ -793,13 +731,12 @@ docs/
 | `KW_EXTRACTOR_GENERIC` | `crawl4ai_http` | 通用网页提取器 |
 | `KW_RECORD_ARCHIVE` | `feishu_bitable` | 元数据归档适配器 |
 | `KW_FULLTEXT_STORE` | `feishu_docs` | 全文存储适配器 |
-| `KW_ARTIFACT_STORE` | `tencent_cos` | 跨阶段临时对象存储适配器 |
 | `KW_COS_REGION` | `ap-shanghai` | COS Bucket 地域，必须与实际 Bucket 一致 |
 | `KW_COS_BUCKET` | `knowwhere-temp-<appid>` | 完整 Bucket 名称，必须显式配置，禁止按“账号第一个 Bucket”隐式选择 |
 | `KW_COS_PREFIX` | `knowwhere-temp/` | 知归专用对象前缀 |
 | `KW_COS_PRESIGNED_URL_TTL_SECONDS` | `3600` | ASR 下载 URL 初始有效期；适配器可按任务状态安全续签 |
 
-首版配置使用根目录 `.env`，仓库只提交 `.env.example`；进程环境变量可以覆盖文件值，生产环境应优先使用 Docker Secret 或外部密钥服务。LLM 固定走 OpenAI 兼容端口，只保留一组通用 `KW_LLM_*` 变量，不以厂商名建立嵌套配置。首版腾讯云 ASR 与 COS 复用 `SecretId`、`SecretKey`。配置加载后生成不可变快照并写入任务，但快照只保存密钥引用或版本，绝不复制密钥明文。生产化时优先改用仅含所需 ASR 与指定 COS 前缀权限的 CAM 子账号密钥。
+配置使用根目录 `.env`，仓库只提交 `.env.example`；进程环境变量可以覆盖文件值，生产环境应优先使用 Docker Secret 或外部密钥服务。LLM 固定走 OpenAI 兼容端口，只保留一组通用 `KW_LLM_*` 变量，不以厂商名建立嵌套配置。选择腾讯云 ASR 时，ASR 与 COS 复用 `SecretId`、`SecretKey`，且配置校验强制 `KW_TEMP_STORAGE_PROVIDER=tencent_cos`。配置加载后生成不可变快照并写入任务，但快照只保存密钥引用或版本，绝不复制密钥明文。生产化时优先改用仅含所需 ASR 与指定 COS 前缀权限的 CAM 子账号密钥。
 
 ### 14.2 注册规则
 
@@ -866,7 +803,7 @@ docs/
 - 镜像固定依赖版本和基础镜像摘要。
 - 浏览器、ASR 和核心服务分别使用最小文件挂载。
 - Cookie 卷只授予需要登录态的平台适配器。
-- 本地临时工作卷不挂载到 gateway；COS 凭据只注入需要上传、签名或清理对象的 Worker。
+- 模型缓存卷与媒体临时卷分离；COS 凭据只注入选择腾讯 ASR、需要上传和清理中转对象的进程。
 
 ---
 
@@ -940,8 +877,8 @@ docs/
 
 #### 已有适配器之间切换
 
-1. 配置新供应商密钥或启用本地 ASR Compose Profile。
-2. 修改 `KW_ASR_PROVIDER`。
+1. 配置目标适配器：本地模式准备模型缓存；腾讯模式准备 ASR/COS 密钥和私有 Bucket。
+2. 同时修改 `KW_ASR_PROVIDER` 与匹配的 `KW_TEMP_STORAGE_PROVIDER`。
 3. 运行 ASR 契约测试和 3 个 Golden 音频样本。
 4. 重启 Worker；新任务记录新的 provider profile 快照。
 5. 旧任务继续使用旧快照；需要切换时发起人工重新处理。
@@ -982,9 +919,9 @@ docs/
 
 ### 19.6 切换临时存储
 
-- `ArtifactRef` 使用逻辑 URI，不把本地绝对路径写入领域对象。
-- 腾讯云 COS 换本地卷、S3 或 MinIO 只替换 `ArtifactStorePort` 和部署配置；ASR 适配器通过能力协商选择 URL 或二进制输入。
-- 生命周期、哈希校验和终态清理规则保持不变。
+- 本地 faster-whisper 固定使用本地临时目录；可通过 `KW_TEMP_LOCAL_ROOT` 调整位置，并通过 `KW_TEMP_DELETE_AFTER_PROCESS` 控制处理后清理。
+- 腾讯 ASR 固定使用腾讯 COS 中转，配置校验会拒绝 `tencent + local` 这种无法工作的组合。
+- 新增必须通过 URL 拉取音频的云 ASR 时，把对象存储封装在对应适配器内部，不把 URL 或 Bucket 概念带入应用用例。
 
 ---
 
@@ -1018,8 +955,8 @@ docs/
 | ADR-009 | 外部操作至少一次执行，通过幂等达到最终一致 | Accepted |
 | ADR-010 | 重型本地能力使用可选 Docker sidecar | Accepted |
 | ADR-011 | 飞书归档工作区由系统首次绑定时幂等创建和版本化管理 | Accepted |
-| ADR-012 | 首版默认 ASR 为腾讯云录音文件识别，faster-whisper 保留为本地替代 | Accepted |
-| ADR-013 | 首版临时对象存储为腾讯云 COS，私有对象通过短期预签名 URL 提交 ASR | Accepted |
+| ADR-012 | 默认 ASR 为进程内 faster-whisper，腾讯云录音文件识别为可选云适配器 | Accepted |
+| ADR-013 | 默认临时存储为可配置本地目录；腾讯 ASR 在适配器内部使用私有 COS 短期中转 | Accepted |
 
 正式编码前建议把每项拆成 `docs/adr/NNNN-*.md`，记录背景、备选方案和后果。
 
@@ -1048,8 +985,8 @@ docs/
 
 ### Phase C：视频闭环
 
-- FFmpeg 媒体适配器、Artifact Store 和清理器。
-- ASR 端口、腾讯云默认适配器和 faster-whisper 可选 sidecar。
+- FFmpeg 媒体适配器、隔离本地临时目录和可配置清理策略。
+- ASR 端口、默认 faster-whisper 适配器和腾讯云 ASR/COS 可选适配器。
 - 分段、重叠合并、检查点和续跑。
 - 小红书和抖音适配器。
 
@@ -1079,8 +1016,8 @@ docs/
 11. PostgreSQL 任务后端可以被 Fake 后端替换运行单元测试。
 12. 配置可访问的用户自建 PostgreSQL 后，Docker Compose 在干净主机可启动、健康检查通过、重启后任务可恢复。
 13. 首次绑定会创建且只创建一套飞书归档资源；重启只校验或迁移，不重复创建。
-14. 腾讯云 COS 与本地 Artifact Store 通过同一契约测试；切换实现不修改转录、任务或归档用例。
-15. COS 上传、预签名读取、幂等删除和失败补偿通过真实 Bucket 集成测试，终态后没有知归临时对象残留。
+14. 本地 faster-whisper 与腾讯 ASR 都接收相同的本地音频路径；切换实现不修改平台提取、任务或归档用例。
+15. 默认清理与显式保留均有测试；腾讯模式的 COS 上传、预签名读取和删除通过适配器测试，终态后没有非预期临时对象残留。
 
 ---
 

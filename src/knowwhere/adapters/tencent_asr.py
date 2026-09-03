@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 from tencentcloud.asr.v20190614 import asr_client, models
@@ -11,7 +12,7 @@ from tencentcloud.common.exception.tencent_cloud_sdk_exception import (
     TencentCloudSDKException,
 )
 
-from knowwhere.application.ports import AsrProviderPort
+from knowwhere.application.ports import ArtifactStorePort, AsrProviderPort, AsrTranscription
 from knowwhere.config import TencentCloudSettings
 
 # 腾讯云异步任务状态常量来自录音文件识别接口。
@@ -28,12 +29,18 @@ class TencentFileAsrProvider(AsrProviderPort):
     def __init__(
         self,
         settings: TencentCloudSettings,
+        artifact_store: ArtifactStorePort,
+        delete_after_process: bool = True,
         client: Any | None = None,
     ) -> None:
         """初始化 ASR 适配器。"""
 
         # ASR 轮询与引擎配置。
         self._settings = settings.asr
+        # 腾讯 ASR 专用的 COS 中转存储。
+        self._artifact_store = artifact_store
+        # 是否在识别结束后删除 COS 临时对象。
+        self._delete_after_process = delete_after_process
         # 官方客户端允许测试注入 Fake。
         self._client = client or asr_client.AsrClient(
             credential.Credential(
@@ -43,9 +50,34 @@ class TencentFileAsrProvider(AsrProviderPort):
             settings.cos.region,
         )
 
+    # 把本地音频暂存 COS 后提交腾讯 ASR。
+    def transcribe(self, audio_path: Path) -> AsrTranscription:
+        """返回当前本地标准音频的腾讯云转录。"""
+
+        if not audio_path.is_file() or audio_path.stat().st_size == 0:
+            raise ValueError("腾讯 ASR 音频文件不存在或为空")
+        # 当前 COS 临时对象引用。
+        artifact_ref = self._artifact_store.put(audio_path.read_bytes(), audio_path.suffix)
+        # 清理失败不会丢弃已经取得的转录正文。
+        cleanup_failed = False
+        try:
+            # 腾讯 ASR 可读取的私有 COS 短时 URL。
+            artifact_url = self._artifact_store.create_download_url(artifact_ref)
+            # 腾讯云返回的当前分段文本。
+            text = self._transcribe_url(artifact_url)
+        finally:
+            if self._delete_after_process:
+                try:
+                    self._artifact_store.delete(artifact_ref)
+                except Exception:
+                    cleanup_failed = True
+        # 非致命清理警告。
+        warnings = ("TEMP_ARTIFACT_CLEANUP_FAILED",) if cleanup_failed else ()
+        return AsrTranscription(text=text, warnings=warnings)
+
     # 提交 URL 音频并轮询到成功、失败或超时。
-    def transcribe(self, artifact_url: str) -> str:
-        """返回当前标准音频文本。"""
+    def _transcribe_url(self, artifact_url: str) -> str:
+        """返回腾讯云当前标准音频文本。"""
 
         if not artifact_url.startswith("https://"):
             raise ValueError("腾讯 ASR 只接收 HTTPS 临时音频地址")

@@ -8,6 +8,7 @@ dependencies = [
   "alembic>=1.16,<2",
   "beautifulsoup4>=4.13,<5",
   "cos-python-sdk-v5>=1.9,<2",
+  "faster-whisper>=1.2,<2",
   "gmssl>=3.2,<4",
   "httpx>=0.28,<1",
   "lark-oapi>=1.4,<2",
@@ -67,5 +68,7 @@ module = [
   "qcloud_cos.*",
   "tencentcloud",
   "tencentcloud.*",
+  "faster_whisper",
+  "faster_whisper.*",
 ]
 ignore_missing_imports = true

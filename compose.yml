@@ -8,6 +8,10 @@ services:
     env_file:
       # PostgreSQL 连接由用户在 .env 的 KW_DATABASE_URL 中提供。
       - .env
+    volumes:
+      # 本地 ASR 模型与工作目录分卷，清理临时文件不会删除模型。
+      - asr-models:/var/lib/knowwhere/models
+      - media-temp:/var/lib/knowwhere/temp
     command: ["migrate-and-health"]
 
   gateway:
@@ -17,5 +21,15 @@ services:
     env_file:
       # Gateway 与管理命令共用用户提供的远端 PostgreSQL 连接。
       - .env
+    volumes:
+      # Gateway 复用已下载模型，并保存任务级本地工作目录。
+      - asr-models:/var/lib/knowwhere/models
+      - media-temp:/var/lib/knowwhere/temp
     command: ["gateway"]
     restart: unless-stopped
+
+volumes:
+  # faster-whisper 模型缓存。
+  asr-models:
+  # 可按 KW_TEMP_DELETE_AFTER_PROCESS 清理或保留的媒体临时卷。
+  media-temp:

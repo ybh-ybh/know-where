@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import httpx
 
-from knowwhere.application.ports import VisionProviderPort
+from knowwhere.application.ports import VisionInput, VisionProviderPort
 from knowwhere.config import VisionModelSettings
 
 
@@ -30,10 +31,10 @@ class GlmVisionProvider(VisionProviderPort):
         )
 
     # 按作品顺序发送全部图片，避免只理解首图。
-    def describe(self, image_urls: tuple[str, ...], caption: str) -> str:
+    def describe(self, images: tuple[VisionInput, ...], caption: str) -> str:
         """返回完整图文正文。"""
 
-        if not image_urls:
+        if not images:
             raise ValueError("图文作品至少需要一张图片")
         # 多模态消息内容，文本提示位于图片之前。
         message_content: list[dict[str, Any]] = [
@@ -48,10 +49,13 @@ class GlmVisionProvider(VisionProviderPort):
                 ),
             }
         ]
-        for image_url in image_urls:
-            # 当前图片只传短时签名地址。
+        for image in images:
+            if not image.path.is_file() or image.path.stat().st_size == 0:
+                raise ValueError("视觉模型本地图片不存在或为空")
+            # 当前本地图片 Base64，避免为了公网 URL 强制依赖对象存储。
+            image_base64 = base64.b64encode(image.path.read_bytes()).decode("ascii")
             message_content.append(
-                {"type": "image_url", "image_url": {"url": image_url}}
+                {"type": "image_url", "image_url": {"url": image_base64}}
             )
         # OpenAI 兼容请求载荷。
         payload: dict[str, Any] = {

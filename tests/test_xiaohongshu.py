@@ -8,13 +8,16 @@ from pathlib import Path
 import httpx
 import pytest
 
+from knowwhere.adapters.local_temp_storage import LocalTempWorkspaceFactory
 from knowwhere.adapters.xiaohongshu import (
     XiaohongshuContentExtractor,
     XiaohongshuMediaDownloader,
     XiaohongshuWebResolver,
     XiaohongshuWork,
 )
-from knowwhere.config import XiaohongshuSettings
+from knowwhere.application.media import AudioTranscriptionService
+from knowwhere.application.ports import AsrTranscription, VisionInput
+from knowwhere.config import TempStorageSettings, XiaohongshuSettings
 from knowwhere.domain.models import ContentType
 
 
@@ -297,14 +300,16 @@ class FakeVision:
     def __init__(self) -> None:
         """初始化 Fake。"""
 
-        # 最近图片地址。
-        self.image_urls: tuple[str, ...] = ()
+        # 最近图片文件名。
+        self.image_names: tuple[str, ...] = ()
 
     # 返回固定图文正文。
-    def describe(self, image_urls: tuple[str, ...], caption: str) -> str:
+    def describe(self, images: tuple[VisionInput, ...], caption: str) -> str:
         """模拟多图理解。"""
 
-        self.image_urls = image_urls
+        assert all(image.path.read_bytes() == b"media" for image in images)
+        # 保留可在工作区清理后断言的文件名。
+        self.image_names = tuple(image.path.name for image in images)
         return f"配文：{caption}\n全部图片的完整 OCR"
 
 
@@ -335,16 +340,24 @@ class FakeAudioExtractor:
 class FakeAsr:
     """固定转录供应商。"""
 
-    # 验证输入是短时 HTTPS URL。
-    def transcribe(self, artifact_url: str) -> str:
+    # 初始化调用记录。
+    def __init__(self) -> None:
+        """初始化 Fake。"""
+
+        # 已转录分段数量。
+        self.calls = 0
+
+    # 验证输入是本地标准音频。
+    def transcribe(self, audio_path: Path) -> AsrTranscription:
         """模拟视频转录。"""
 
-        assert artifact_url.startswith("https://cos.example/")
-        return "这是完整视频转录。"
+        assert audio_path.read_bytes() == b"audio"
+        self.calls += 1
+        return AsrTranscription(text="这是完整视频转录。")
 
 
 # 图文链路必须上传、理解并清理全部图片。
-def test_image_text_extractor_processes_and_deletes_every_image() -> None:
+def test_image_text_extractor_processes_and_deletes_every_image(tmp_path: Path) -> None:
     """验证小红书图文媒体生命周期。"""
 
     # 图文工作对象。
@@ -362,19 +375,21 @@ def test_image_text_extractor_processes_and_deletes_every_image() -> None:
             "https://sns-webpic-qc.xhscdn.com/image-2",
         ),
     )
-    # COS Fake。
-    store = FakeArtifactStore()
     # 视觉 Fake。
     vision = FakeVision()
+    # 受控本地临时目录。
+    workspace_root = tmp_path / "temp"
     # 被测提取器。
     extractor = XiaohongshuContentExtractor(
         settings=XiaohongshuSettings(),
         resolver=FakeResolver(work),  # type: ignore[arg-type]
         downloader=FakeDownloader(),  # type: ignore[arg-type]
-        artifact_store=store,
-        asr=FakeAsr(),
+        transcriber=AudioTranscriptionService(FakeAsr()),
         vision=vision,
         audio_extractor=FakeAudioExtractor(),  # type: ignore[arg-type]
+        temp_workspaces=LocalTempWorkspaceFactory(
+            TempStorageSettings(local_root=workspace_root)
+        ),
     )
 
     # 领域提取结果。
@@ -383,12 +398,12 @@ def test_image_text_extractor_processes_and_deletes_every_image() -> None:
     assert content.platform == "小红书"
     assert content.content_type is ContentType.IMAGE_TEXT
     assert "完整 OCR" in content.body_text
-    assert len(vision.image_urls) == 2
-    assert store.deleted_refs == store.put_refs
+    assert vision.image_names == ("image-0.bin", "image-1.bin")
+    assert list(workspace_root.iterdir()) == []
 
 
 # 视频链路必须合并配文与全部分段转录并清理音频对象。
-def test_video_extractor_transcribes_and_deletes_audio() -> None:
+def test_video_extractor_transcribes_and_deletes_audio(tmp_path: Path) -> None:
     """验证小红书视频媒体生命周期。"""
 
     # 视频工作对象。
@@ -403,17 +418,21 @@ def test_video_extractor_transcribes_and_deletes_audio() -> None:
         published_at=None,
         video_urls=("https://sns-video-v3.xhscdn.com/video.mp4",),
     )
-    # COS Fake。
-    store = FakeArtifactStore()
+    # 记录本地 ASR 调用。
+    asr = FakeAsr()
+    # 受控本地临时目录。
+    workspace_root = tmp_path / "temp"
     # 被测提取器。
     extractor = XiaohongshuContentExtractor(
         settings=XiaohongshuSettings(),
         resolver=FakeResolver(work),  # type: ignore[arg-type]
         downloader=FakeDownloader(),  # type: ignore[arg-type]
-        artifact_store=store,
-        asr=FakeAsr(),
+        transcriber=AudioTranscriptionService(asr),
         vision=None,
         audio_extractor=FakeAudioExtractor(),  # type: ignore[arg-type]
+        temp_workspaces=LocalTempWorkspaceFactory(
+            TempStorageSettings(local_root=workspace_root)
+        ),
     )
 
     # 领域提取结果。
@@ -422,5 +441,5 @@ def test_video_extractor_transcribes_and_deletes_audio() -> None:
     assert content.content_type is ContentType.VIDEO
     assert "视频配文" in content.body_text
     assert content.body_text.count("完整视频转录") == 2
-    assert len(store.put_refs) == 2
-    assert store.deleted_refs == store.put_refs
+    assert asr.calls == 2
+    assert list(workspace_root.iterdir()) == []

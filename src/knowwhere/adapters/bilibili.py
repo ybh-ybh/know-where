@@ -6,7 +6,6 @@ import base64
 import hashlib
 import json
 import secrets
-import tempfile
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,9 +16,9 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 import httpx
 
 from knowwhere.adapters.douyin import FfmpegAudioExtractor
+from knowwhere.adapters.local_temp_storage import LocalTempWorkspaceFactory
+from knowwhere.application.media import AudioTranscriptionService
 from knowwhere.application.ports import (
-    ArtifactStorePort,
-    AsrProviderPort,
     ContentExtractorPort,
     ExtractionProgress,
 )
@@ -670,7 +669,7 @@ class BilibiliMediaDownloader:
         return content_type.split(";", 1)[0].strip().lower()
 
 
-# B站内容提取器复用现有音频标准化、COS 与 ASR 端口。
+# B站内容提取器复用本地音频标准化与 ASR 端口。
 class BilibiliContentExtractor(ContentExtractorPort):
     """把B站公开视频转换为 ExtractedContent。"""
 
@@ -680,9 +679,9 @@ class BilibiliContentExtractor(ContentExtractorPort):
         settings: BilibiliSettings,
         resolver: BilibiliWebResolver,
         downloader: BilibiliMediaDownloader,
-        artifact_store: ArtifactStorePort,
-        asr: AsrProviderPort,
+        transcriber: AudioTranscriptionService,
         audio_extractor: FfmpegAudioExtractor,
+        temp_workspaces: LocalTempWorkspaceFactory,
     ) -> None:
         """初始化B站提取器。"""
 
@@ -692,12 +691,12 @@ class BilibiliContentExtractor(ContentExtractorPort):
         self._resolver = resolver
         # DASH 音频下载器。
         self._downloader = downloader
-        # 私有临时对象存储。
-        self._artifact_store = artifact_store
-        # 录音文件识别供应商。
-        self._asr = asr
+        # 供应商无关的分段转录服务。
+        self._transcriber = transcriber
         # 本地音频标准化器。
         self._audio_extractor = audio_extractor
+        # 可配置的本地临时工作区。
+        self._temp_workspaces = temp_workspaces
 
     # 解析、下载和转录单个B站视频分P。
     def extract(
@@ -730,7 +729,7 @@ class BilibiliContentExtractor(ContentExtractorPort):
             warnings=warnings,
         )
 
-    # 下载音频、标准化分段、暂存 COS、调用腾讯 ASR 并清理。
+    # 下载音频、标准化分段并调用已配置的 ASR。
     def _extract_audio(
         self,
         work: BilibiliWork,
@@ -738,93 +737,69 @@ class BilibiliContentExtractor(ContentExtractorPort):
     ) -> tuple[str, tuple[str, ...]]:
         """返回视频简介、完整转录和清理警告。"""
 
-        # 当前 COS 音频对象引用。
-        artifact_ref: str | None = None
-        # 临时对象清理是否失败。
-        cleanup_failed = False
-        # 按原视频时间顺序排列的分段转录。
-        transcripts: list[str] = []
-        try:
-            with tempfile.TemporaryDirectory(prefix="knowwhere-bilibili-audio-") as temp_dir:
-                # 当前临时目录。
-                temp_path = Path(temp_dir)
-                # DASH 音频输入路径，FFmpeg 会按容器内容自动识别。
-                source_audio_path = temp_path / "source-audio.m4s"
-                try:
-                    self._downloader.download(
-                        work.audio_urls,
-                        source_audio_path,
-                        self._settings.max_audio_bytes,
-                    )
-                except BilibiliMediaUnavailableError:
-                    # 短期 CDN 地址可能过期，仅刷新一次播放信息。
-                    refreshed_work = self._resolver.resolve(work.source_url)
-                    if refreshed_work.bvid != work.bvid or refreshed_work.cid != work.cid:
-                        raise ValueError("B站媒体地址刷新后作品身份发生变化") from None
-                    self._report(progress, "bilibili_audio_urls_refreshed", {})
-                    self._downloader.download(
-                        refreshed_work.audio_urls,
-                        source_audio_path,
-                        self._settings.max_audio_bytes,
-                    )
-                self._report(
-                    progress,
-                    "bilibili_audio_downloaded",
-                    {"audio_bytes": source_audio_path.stat().st_size},
-                )
-                # 单声道 16k 有序音频分段。
-                audio_paths = self._audio_extractor.extract_segments(
+        with self._temp_workspaces.create("knowwhere-bilibili-audio-") as temp_dir:
+            # 当前临时目录。
+            temp_path = Path(temp_dir)
+            # DASH 音频输入路径，FFmpeg 会按容器内容自动识别。
+            source_audio_path = temp_path / "source-audio.m4s"
+            try:
+                self._downloader.download(
+                    work.audio_urls,
                     source_audio_path,
-                    temp_path,
+                    self._settings.max_audio_bytes,
                 )
+            except BilibiliMediaUnavailableError:
+                # 短期 CDN 地址可能过期，仅刷新一次播放信息。
+                refreshed_work = self._resolver.resolve(work.source_url)
+                if refreshed_work.bvid != work.bvid or refreshed_work.cid != work.cid:
+                    raise ValueError("B站媒体地址刷新后作品身份发生变化") from None
+                self._report(progress, "bilibili_audio_urls_refreshed", {})
+                self._downloader.download(
+                    refreshed_work.audio_urls,
+                    source_audio_path,
+                    self._settings.max_audio_bytes,
+                )
+            self._report(
+                progress,
+                "bilibili_audio_downloaded",
+                {"audio_bytes": source_audio_path.stat().st_size},
+            )
+            # 单声道 16k 有序音频分段。
+            audio_paths = self._audio_extractor.extract_segments(
+                source_audio_path,
+                temp_path,
+            )
+            self._report(
+                progress,
+                "bilibili_audio_extracted",
+                {
+                    "segment_count": len(audio_paths),
+                    "audio_bytes": sum(path.stat().st_size for path in audio_paths),
+                },
+            )
+
+            # 报告单个 ASR 分段完成且不暴露本地路径。
+            def segment_completed(segment_index: int, segment_count: int) -> None:
+                """保存当前B站转录进度。"""
+
                 self._report(
                     progress,
-                    "bilibili_audio_extracted",
-                    {
-                        "segment_count": len(audio_paths),
-                        "audio_bytes": sum(path.stat().st_size for path in audio_paths),
-                    },
+                    "bilibili_asr_segment_completed",
+                    {"segment_index": segment_index, "segment_count": segment_count},
                 )
-                for segment_index, audio_path in enumerate(audio_paths):
-                    artifact_ref = self._artifact_store.put(audio_path.read_bytes(), ".mp3")
-                    self._report(
-                        progress,
-                        "bilibili_audio_uploaded",
-                        {"segment_index": segment_index, "segment_count": len(audio_paths)},
-                    )
-                    # 腾讯 ASR 可读的私有 COS 短时 URL。
-                    audio_url = self._artifact_store.create_download_url(artifact_ref)
-                    # 当前音频分段转录。
-                    transcript_part = self._asr.transcribe(audio_url).strip()
-                    if transcript_part:
-                        transcripts.append(transcript_part)
-                    try:
-                        self._artifact_store.delete(artifact_ref)
-                    except Exception:
-                        cleanup_failed = True
-                    artifact_ref = None
-                    self._report(
-                        progress,
-                        "bilibili_asr_segment_completed",
-                        {"segment_index": segment_index, "segment_count": len(audio_paths)},
-                    )
-            # 空转录不能伪装成完整视频证据或完成检查点。
-            if not transcripts:
-                raise ValueError("B站视频语音转录为空，拒绝生成伪完整摘要")
+
+            # 已按顺序合并的完整视频转录。
+            transcription = self._transcriber.transcribe_segments(
+                audio_paths,
+                segment_completed,
+            )
             self._report(progress, "bilibili_asr_completed", {})
-        finally:
-            if artifact_ref is not None:
-                try:
-                    self._artifact_store.delete(artifact_ref)
-                except Exception:
-                    cleanup_failed = True
         # 视频简介与语音证据共同组成可分析正文。
-        transcript = "\n".join(transcripts)
         # 可检索的最终正文不包含处理分段标记。
-        body_text = f"视频简介：\n{work.description or '无'}\n\n视频转录：\n{transcript}"
-        # 清理失败作为可观察警告。
-        warnings = ("TEMP_ARTIFACT_CLEANUP_FAILED",) if cleanup_failed else ()
-        return body_text, warnings
+        body_text = (
+            f"视频简介：\n{work.description or '无'}\n\n视频转录：\n{transcription.text}"
+        )
+        return body_text, transcription.warnings
 
     # 可选进度回调统一空值处理。
     @staticmethod

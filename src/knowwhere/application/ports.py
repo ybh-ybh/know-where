@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from knowwhere.domain.models import (
@@ -15,6 +17,28 @@ from knowwhere.domain.models import (
 
 # 提取器通过回调持久化阶段进度，数据中不得包含凭据或临时签名 URL。
 ExtractionProgress = Callable[[str, dict[str, object]], None]
+
+
+# 单个本地视觉输入，避免视觉端口强制依赖公网 URL。
+@dataclass(frozen=True, slots=True)
+class VisionInput:
+    """描述一张已安全下载的本地图片。"""
+
+    # 本地图片路径。
+    path: Path
+    # 经过下载器校验的媒体类型。
+    media_type: str
+
+
+# 单个 ASR 分段的稳定输出。
+@dataclass(frozen=True, slots=True)
+class AsrTranscription:
+    """保存转录正文和非致命警告。"""
+
+    # 当前音频分段正文。
+    text: str
+    # 供应商暂存清理等非致命警告。
+    warnings: tuple[str, ...] = ()
 
 
 # 内容提取端口。
@@ -111,9 +135,9 @@ class TaskRepositoryPort(Protocol):
         """支持内容去重。"""
 
 
-# 临时对象存储端口骨架。
+# 仅供需要远程 URL 的供应商适配器使用的中转存储端口。
 class ArtifactStorePort(Protocol):
-    """保存可清理临时对象。"""
+    """保存可清理的供应商中转对象。"""
 
     # 上传字节并返回不透明引用。
     def put(self, data: bytes, suffix: str) -> str:
@@ -130,17 +154,17 @@ class ArtifactStorePort(Protocol):
 
 # ASR 端口骨架。
 class AsrProviderPort(Protocol):
-    """把标准音频引用转成文本。"""
+    """把本地标准音频文件转成文本。"""
 
     # 转录一个标准音频分段。
-    def transcribe(self, artifact_url: str) -> str:
-        """返回当前分段文本。"""
+    def transcribe(self, audio_path: Path) -> AsrTranscription:
+        """返回当前分段转录。"""
 
 
-# 视觉模型端口只接收可短时访问的图片地址。
+# 视觉模型端口接收已验证的本地图片。
 class VisionProviderPort(Protocol):
-    """把有序图片和作品配文转换为可归档正文。"""
+    """把有序本地图片和作品配文转换为可归档正文。"""
 
     # 按图片原顺序执行 OCR 和语义理解。
-    def describe(self, image_urls: tuple[str, ...], caption: str) -> str:
+    def describe(self, images: tuple[VisionInput, ...], caption: str) -> str:
         """返回完整图文正文。"""

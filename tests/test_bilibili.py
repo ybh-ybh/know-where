@@ -15,7 +15,10 @@ from knowwhere.adapters.bilibili import (
     BilibiliWebResolver,
     BilibiliWork,
 )
-from knowwhere.config import BilibiliSettings
+from knowwhere.adapters.local_temp_storage import LocalTempWorkspaceFactory
+from knowwhere.application.media import AudioTranscriptionService
+from knowwhere.application.ports import AsrTranscription
+from knowwhere.config import BilibiliSettings, TempStorageSettings
 from knowwhere.domain.models import ContentQuality, ContentType
 
 
@@ -354,16 +357,16 @@ class FakeAsr:
         # 每个分段返回的文本。
         self._text = text
 
-    # 验证输入是短时 HTTPS URL。
-    def transcribe(self, artifact_url: str) -> str:
+    # 验证输入是本地标准音频。
+    def transcribe(self, audio_path: Path) -> AsrTranscription:
         """模拟音频转录。"""
 
-        assert artifact_url.startswith("https://cos.example/")
-        return self._text
+        assert audio_path.read_bytes() == b"audio"
+        return AsrTranscription(text=self._text)
 
 
 # B站视频应复用音频分段、ASR 和临时对象清理流程。
-def test_content_extractor_transcribes_audio_and_deletes_artifacts() -> None:
+def test_content_extractor_transcribes_audio_and_deletes_artifacts(tmp_path: Path) -> None:
     """验证 B站视频到规范内容的完整适配器生命周期。"""
 
     # 预置B站作品。
@@ -382,18 +385,20 @@ def test_content_extractor_transcribes_audio_and_deletes_artifacts() -> None:
         audio_urls=("https://audio.example/source.m4s",),
         audio_mime_type="audio/mp4",
     )
-    # COS Fake。
-    store = FakeArtifactStore()
     # 进度阶段列表。
     stages: list[str] = []
+    # 受控本地临时目录。
+    workspace_root = tmp_path / "temp"
     # 被测提取器。
     extractor = BilibiliContentExtractor(
         settings=BilibiliSettings(),
         resolver=FakeResolver(work),  # type: ignore[arg-type]
         downloader=FakeDownloader(),  # type: ignore[arg-type]
-        artifact_store=store,
-        asr=FakeAsr(),
+        transcriber=AudioTranscriptionService(FakeAsr()),
         audio_extractor=FakeAudioExtractor(),  # type: ignore[arg-type]
+        temp_workspaces=LocalTempWorkspaceFactory(
+            TempStorageSettings(local_root=workspace_root)
+        ),
     )
 
     # 规范内容结果。
@@ -405,21 +410,19 @@ def test_content_extractor_transcribes_audio_and_deletes_artifacts() -> None:
     assert content.platform_content_id == work.platform_content_id
     assert "视频简介" in content.body_text
     assert content.body_text.count("完整视频转录") == 2
-    assert store.deleted_refs == store.put_refs
+    assert list(workspace_root.iterdir()) == []
     assert stages == [
         "bilibili_resolved",
         "bilibili_audio_downloaded",
         "bilibili_audio_extracted",
-        "bilibili_audio_uploaded",
         "bilibili_asr_segment_completed",
-        "bilibili_audio_uploaded",
         "bilibili_asr_segment_completed",
         "bilibili_asr_completed",
     ]
 
 
 # 所有 CDN 候选失效时应重新解析一次，不能无限刷新。
-def test_content_extractor_refreshes_expired_audio_urls_once() -> None:
+def test_content_extractor_refreshes_expired_audio_urls_once(tmp_path: Path) -> None:
     """验证短期播放地址的一次性刷新。"""
 
     # 预置单P作品。
@@ -449,9 +452,11 @@ def test_content_extractor_refreshes_expired_audio_urls_once() -> None:
         settings=BilibiliSettings(),
         resolver=resolver,  # type: ignore[arg-type]
         downloader=downloader,  # type: ignore[arg-type]
-        artifact_store=FakeArtifactStore(),
-        asr=FakeAsr(),
+        transcriber=AudioTranscriptionService(FakeAsr()),
         audio_extractor=FakeAudioExtractor(),  # type: ignore[arg-type]
+        temp_workspaces=LocalTempWorkspaceFactory(
+            TempStorageSettings(local_root=tmp_path / "temp")
+        ),
     )
 
     extractor.extract(work.source_url, lambda stage, _data: stages.append(stage))
@@ -462,7 +467,7 @@ def test_content_extractor_refreshes_expired_audio_urls_once() -> None:
 
 
 # 空 ASR 结果必须失败，不能留下伪完成检查点。
-def test_content_extractor_rejects_empty_transcript() -> None:
+def test_content_extractor_rejects_empty_transcript(tmp_path: Path) -> None:
     """验证完整视频摘要只建立在真实转录证据上。"""
 
     # 预置单P作品。
@@ -481,22 +486,24 @@ def test_content_extractor_rejects_empty_transcript() -> None:
         audio_urls=("https://audio.example/source.m4s",),
         audio_mime_type="audio/mp4",
     )
-    # COS Fake。
-    store = FakeArtifactStore()
     # 进度阶段列表。
     stages: list[str] = []
+    # 受控本地临时目录。
+    workspace_root = tmp_path / "temp"
     # 返回空文本的被测提取器。
     extractor = BilibiliContentExtractor(
         settings=BilibiliSettings(),
         resolver=FakeResolver(work),  # type: ignore[arg-type]
         downloader=FakeDownloader(),  # type: ignore[arg-type]
-        artifact_store=store,
-        asr=FakeAsr(""),
+        transcriber=AudioTranscriptionService(FakeAsr("")),
         audio_extractor=FakeAudioExtractor(),  # type: ignore[arg-type]
+        temp_workspaces=LocalTempWorkspaceFactory(
+            TempStorageSettings(local_root=workspace_root)
+        ),
     )
 
     with pytest.raises(ValueError, match="转录为空"):
         extractor.extract(work.source_url, lambda stage, _data: stages.append(stage))
 
-    assert store.deleted_refs == store.put_refs
+    assert list(workspace_root.iterdir()) == []
     assert "bilibili_asr_completed" not in stages

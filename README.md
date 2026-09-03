@@ -15,10 +15,10 @@
 - 小红书 `xhslink.cn`/`xhslink.com` 分享短链和标准详情链接还原，匿名解析公开页面初始状态中的图文或视频事实字段。
 - 小红书图文按原顺序处理全部图片；视频选择最高分辨率媒体流，并在首选 CDN 失败时回退同流备用地址。
 - 抖音分享短链还原、A-Bogus 作品详情解析，以及图文/视频事实字段分流。
-- 抖音图文全部图片经私有 COS 短时 URL 交给 GLM-4.6V 做有序 OCR 和视觉理解。
-- 抖音视频经 FFmpeg 标准化为单声道 16k MP3，并按 4 小时切成腾讯单任务安全分段，再由腾讯云录音文件识别顺序转录。
+- 抖音图文全部图片以本地 Base64 输入交给 GLM-4.6V 做有序 OCR 和视觉理解，不依赖对象存储。
+- 视频经 FFmpeg 标准化为单声道 16k MP3，并由可配置的本地 faster-whisper 或腾讯云录音文件识别顺序转录。
 - B站标准链接、`b23.tv` 分享短链和分P解析；匿名获取公开元数据与 DASH 音频，按带宽选择音轨并在 CDN 失败时回退备用地址。
-- COS 临时对象在成功和失败路径都会清理；任务保存无密钥阶段检查点。
+- 本地工作目录可配置；临时文件默认在成功和失败路径清理，也可显式保留用于调试。
 - AI 同步生成简短标题、分类、标签与摘要，飞书同时保留未经改写的原始标题。
 - 飞书提供“阅读状态”和默认留空的“阅读时间”字段。
 - 提示词主约束 + few-shot + `json_object` + Pydantic Schema 校验。
@@ -32,18 +32,18 @@
 ```text
 飞书私聊 / CLI
   → 内容平台分派器（微信 / 掘金 / GitHub / 小红书 / 抖音 / B站）
-  → 小红书图文：全部图片 → 私有 COS → GLM 视觉正文 → 清理
-  → 小红书视频：视频 → FFmpeg 音频 → 私有 COS → 腾讯 ASR → 清理
-  → 抖音图文：全部图片 → 私有 COS → GLM 视觉正文 → 清理
-  → 抖音视频：视频 → FFmpeg 音频 → 私有 COS → 腾讯 ASR → 清理
-  → B站视频：DASH 音频 → FFmpeg 标准音频 → 私有 COS → 腾讯 ASR → 清理
+  → 小红书/抖音图文：全部图片 → 本地 Base64 → GLM 视觉正文 → 清理
+  → 小红书/抖音视频：视频 → 本地 FFmpeg 音频 → 已配置 ASR → 清理
+  → B站视频：DASH 音频 → 本地 FFmpeg 标准音频 → 已配置 ASR → 清理
+  → 本地 ASR：本地音频 → faster-whisper
+  → 腾讯 ASR：本地音频 → 私有 COS 短时 URL → 腾讯 ASR → 清理 COS
   → 飞书分类目录
   → OpenAI 兼容 LLM
   → 飞书多维表格
   → PostgreSQL 完成快照
 ```
 
-业务流水线只依赖稳定端口。小红书、抖音和 B站提取器通过 `ArtifactStorePort`、`VisionProviderPort` 和 `AsrProviderPort` 使用外部能力；供应商选择集中在 `composition.py`，切换实现时不修改状态机。
+业务流水线只依赖稳定端口。小红书、抖音和 B站提取器把本地音频交给统一的 `AudioTranscriptionService`；供应商选择集中在 `composition.py`。COS 只作为腾讯 ASR 适配器的内部中转依赖，本地 ASR 不构造腾讯客户端。
 
 ### 小红书媒体提取策略
 
@@ -62,7 +62,7 @@ B站适配器先通过公开 `view` 接口取得 BV、CID、标题、UP 主、�
 1. 安装 Python 3.12、[uv](https://docs.astral.sh/uv/) 和 Docker Desktop。
 2. 复制 `.env.example` 为 `.env`。
 3. 填入用户自建 PostgreSQL、飞书和一个 OpenAI 兼容 LLM 的必填配置。
-4. 小红书/抖音图文和视频以及 B站视频需填写腾讯云 COS/ASR 配置；图文还需填写独立的 `KW_VISION_*` 配置。
+4. 视频默认使用本地 faster-whisper；若切换腾讯 ASR，需同时填写腾讯云 COS/ASR 配置。图文需填写独立的 `KW_VISION_*` 配置。
 5. 确认飞书应用已经发布、启用机器人能力，并订阅 `im.message.receive_v1` 事件。
 
 `.env` 已被 Git 和 Docker 构建上下文忽略。不要把真实密钥写进镜像、日志、提交、Issue 或问题截图。Docker Compose 通过 `env_file` 在运行时注入配置，不把密钥复制进镜像。
@@ -71,7 +71,7 @@ PostgreSQL 由用户自行部署和备份，Compose 不再创建数据库容器�
 
 LLM 统一使用 `KW_LLM_API_KEY`、`KW_LLM_BASE_URL` 和 `KW_LLM_MODEL`，不在配置结构中绑定具体厂商。`KW_LLM_THINKING_MODE` 是非标准兼容扩展，默认 `disabled`；需要时可设为 `enabled`，供应商不支持该字段时保持为空。
 
-视觉模型使用独立的 `KW_VISION_API_KEY`、`KW_VISION_BASE_URL` 和 `KW_VISION_MODEL`。智谱示例地址为 `https://open.bigmodel.cn/api/paas/v4`，官方模型 ID 为 `glm-4.6v`。腾讯云视频链路要求 COS Bucket 为私有读写，并为当前凭据授予限定前缀的上传、读取、删除权限及录音文件识别权限；账号还必须有可用 ASR 额度。
+视觉模型使用独立的 `KW_VISION_API_KEY`、`KW_VISION_BASE_URL` 和 `KW_VISION_MODEL`。智谱示例地址为 `https://open.bigmodel.cn/api/paas/v4`，官方模型 ID 为 `glm-4.6v`；本地图片通过 Base64 发送。`KW_ASR_PROVIDER=faster_whisper` 不需要云端凭据，首次使用会按配置下载模型。腾讯模式必须设置 `KW_TEMP_STORAGE_PROVIDER=tencent_cos`，Bucket 应为私有读写，并为当前凭据授予限定前缀的上传、读取、删除权限及录音文件识别权限。
 
 ## 本地运行
 

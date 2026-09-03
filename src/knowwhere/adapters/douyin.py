@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import secrets
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,11 +13,12 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from knowwhere.adapters._vendor.f2_abogus import ABogus, BrowserFingerprintGenerator
+from knowwhere.adapters.local_temp_storage import LocalTempWorkspaceFactory
+from knowwhere.application.media import AudioTranscriptionService
 from knowwhere.application.ports import (
-    ArtifactStorePort,
-    AsrProviderPort,
     ContentExtractorPort,
     ExtractionProgress,
+    VisionInput,
     VisionProviderPort,
 )
 from knowwhere.config import DouyinSettings
@@ -494,7 +494,7 @@ class FfmpegAudioExtractor:
         return audio_paths
 
 
-# 抖音内容提取器编排解析、媒体暂存、视觉理解或 ASR。
+# 抖音内容提取器编排解析、本地媒体、视觉理解或 ASR。
 class DouyinContentExtractor(ContentExtractorPort):
     """把抖音图文与视频统一转换为 ExtractedContent。"""
 
@@ -504,10 +504,10 @@ class DouyinContentExtractor(ContentExtractorPort):
         settings: DouyinSettings,
         resolver: DouyinWebResolver,
         downloader: DouyinMediaDownloader,
-        artifact_store: ArtifactStorePort,
-        asr: AsrProviderPort,
+        transcriber: AudioTranscriptionService,
         vision: VisionProviderPort | None,
         audio_extractor: FfmpegAudioExtractor,
+        temp_workspaces: LocalTempWorkspaceFactory,
     ) -> None:
         """初始化抖音提取器。"""
 
@@ -517,14 +517,14 @@ class DouyinContentExtractor(ContentExtractorPort):
         self._resolver = resolver
         # CDN 媒体下载器。
         self._downloader = downloader
-        # 私有临时对象存储。
-        self._artifact_store = artifact_store
-        # 录音文件识别供应商。
-        self._asr = asr
+        # 供应商无关的分段转录服务。
+        self._transcriber = transcriber
         # 可选视觉模型。
         self._vision = vision
         # 本地音频标准化器。
         self._audio_extractor = audio_extractor
+        # 可配置的本地临时工作区。
+        self._temp_workspaces = temp_workspaces
 
     # 按真实作品类型执行唯一分支。
     def extract(
@@ -561,7 +561,7 @@ class DouyinContentExtractor(ContentExtractorPort):
             warnings=warnings,
         )
 
-    # 下载全部图片、暂存 COS、调用视觉模型并清理。
+    # 下载全部图片并通过本地输入调用视觉模型。
     def _extract_image_text(
         self,
         work: DouyinWork,
@@ -571,47 +571,28 @@ class DouyinContentExtractor(ContentExtractorPort):
 
         if self._vision is None:
             raise ValueError("处理抖音图文必须配置 KW_VISION_API_KEY/BASE_URL/MODEL")
-        # 已上传 COS 对象引用。
-        artifact_refs: list[str] = []
-        # 临时对象清理是否失败。
-        cleanup_failed = False
-        try:
-            with tempfile.TemporaryDirectory(prefix="knowwhere-douyin-images-") as temp_dir:
-                # 当前临时目录。
-                temp_path = Path(temp_dir)
-                for index, image_url in enumerate(work.image_urls):
-                    # 当前图片本地路径。
-                    image_path = temp_path / f"image-{index}.bin"
-                    # 媒体响应类型。
-                    content_type = self._downloader.download(
-                        image_url,
-                        image_path,
-                        self._settings.max_image_bytes,
-                    )
-                    # COS 对象后缀。
-                    suffix = self._image_suffix(content_type)
-                    # 当前对象引用。
-                    artifact_ref = self._artifact_store.put(image_path.read_bytes(), suffix)
-                    artifact_refs.append(artifact_ref)
-            self._report(progress, "douyin_images_uploaded", {"count": len(artifact_refs)})
-            # 有序短时图片地址。
-            image_download_urls = tuple(
-                self._artifact_store.create_download_url(ref) for ref in artifact_refs
-            )
+        with self._temp_workspaces.create("knowwhere-douyin-images-") as temp_dir:
+            # 当前临时目录。
+            temp_path = Path(temp_dir)
+            # 保持作品原顺序的本地图片输入。
+            images: list[VisionInput] = []
+            for index, image_url in enumerate(work.image_urls):
+                # 当前图片本地路径。
+                image_path = temp_path / f"image-{index}.bin"
+                # 媒体响应类型。
+                content_type = self._downloader.download(
+                    image_url,
+                    image_path,
+                    self._settings.max_image_bytes,
+                )
+                images.append(VisionInput(path=image_path, media_type=content_type))
+            self._report(progress, "douyin_images_downloaded", {"count": len(images)})
             # 视觉模型完整正文。
-            body_text = self._vision.describe(image_download_urls, work.caption)
-            self._report(progress, "douyin_vision_completed", {"count": len(artifact_refs)})
-        finally:
-            for artifact_ref in artifact_refs:
-                try:
-                    self._artifact_store.delete(artifact_ref)
-                except Exception:
-                    cleanup_failed = True
-        # 清理失败作为可观察警告，不丢弃已成功生成的正文。
-        warnings = ("TEMP_ARTIFACT_CLEANUP_FAILED",) if cleanup_failed else ()
-        return body_text, warnings
+            body_text = self._vision.describe(tuple(images), work.caption)
+            self._report(progress, "douyin_vision_completed", {"count": len(images)})
+        return body_text, ()
 
-    # 下载视频、标准化音频、暂存 COS、调用腾讯 ASR 并清理。
+    # 下载视频、标准化音频并调用已配置的 ASR。
     def _extract_video(
         self,
         work: DouyinWork,
@@ -621,83 +602,48 @@ class DouyinContentExtractor(ContentExtractorPort):
 
         if work.video_url is None:
             raise ValueError("抖音视频作品缺少播放地址")
-        # 当前 COS 音频对象引用。
-        artifact_ref: str | None = None
-        # 临时对象清理是否失败。
-        cleanup_failed = False
-        # 按原视频时间顺序排列的分段转录。
-        transcripts: list[str] = []
-        try:
-            with tempfile.TemporaryDirectory(prefix="knowwhere-douyin-video-") as temp_dir:
-                # 当前临时目录。
-                temp_path = Path(temp_dir)
-                # 下载视频路径。
-                video_path = temp_path / "source-video.mp4"
-                self._downloader.download(
-                    work.video_url,
-                    video_path,
-                    self._settings.max_video_bytes,
-                )
-                self._report(progress, "douyin_video_downloaded", {})
-                # 单声道 16k 有序音频分段。
-                audio_paths = self._audio_extractor.extract_segments(video_path, temp_path)
+        with self._temp_workspaces.create("knowwhere-douyin-video-") as temp_dir:
+            # 当前临时目录。
+            temp_path = Path(temp_dir)
+            # 下载视频路径。
+            video_path = temp_path / "source-video.mp4"
+            self._downloader.download(
+                work.video_url,
+                video_path,
+                self._settings.max_video_bytes,
+            )
+            self._report(progress, "douyin_video_downloaded", {})
+            # 单声道 16k 有序音频分段。
+            audio_paths = self._audio_extractor.extract_segments(video_path, temp_path)
+            self._report(
+                progress,
+                "douyin_audio_extracted",
+                {
+                    "segment_count": len(audio_paths),
+                    "audio_bytes": sum(path.stat().st_size for path in audio_paths),
+                },
+            )
+
+            # 报告单个 ASR 分段完成且不暴露本地路径。
+            def segment_completed(segment_index: int, segment_count: int) -> None:
+                """保存当前抖音转录进度。"""
+
                 self._report(
                     progress,
-                    "douyin_audio_extracted",
-                    {
-                        "segment_count": len(audio_paths),
-                        "audio_bytes": sum(path.stat().st_size for path in audio_paths),
-                    },
+                    "douyin_asr_segment_completed",
+                    {"segment_index": segment_index, "segment_count": segment_count},
                 )
-                for segment_index, audio_path in enumerate(audio_paths):
-                    artifact_ref = self._artifact_store.put(audio_path.read_bytes(), ".mp3")
-                    self._report(
-                        progress,
-                        "douyin_audio_uploaded",
-                        {"segment_index": segment_index, "segment_count": len(audio_paths)},
-                    )
-                    # 腾讯 ASR 可读的私有 COS 短时 URL。
-                    audio_url = self._artifact_store.create_download_url(artifact_ref)
-                    # 当前音频分段转录。
-                    transcripts.append(self._asr.transcribe(audio_url))
-                    try:
-                        self._artifact_store.delete(artifact_ref)
-                    except Exception:
-                        cleanup_failed = True
-                    artifact_ref = None
-                    self._report(
-                        progress,
-                        "douyin_asr_segment_completed",
-                        {"segment_index": segment_index, "segment_count": len(audio_paths)},
-                    )
+
+            # 已按顺序合并的完整视频转录。
+            transcription = self._transcriber.transcribe_segments(
+                audio_paths,
+                segment_completed,
+            )
             self._report(progress, "douyin_asr_completed", {})
-        finally:
-            if artifact_ref is not None:
-                try:
-                    self._artifact_store.delete(artifact_ref)
-                except Exception:
-                    cleanup_failed = True
         # 配文和语音证据共同组成可分析正文。
         # 分段边界只用于处理，不污染最终可检索正文。
-        transcript = "\n".join(transcripts)
-        body_text = f"作品配文：\n{work.caption or '无'}\n\n视频转录：\n{transcript}"
-        # 清理失败作为可观察警告。
-        warnings = ("TEMP_ARTIFACT_CLEANUP_FAILED",) if cleanup_failed else ()
-        return body_text, warnings
-
-    # 根据响应类型选择视觉模型可识别后缀。
-    @staticmethod
-    def _image_suffix(content_type: str) -> str:
-        """返回安全图片后缀。"""
-
-        # 常见图片 MIME 到扩展名映射。
-        suffixes = {
-            "image/jpeg": ".jpg",
-            "image/png": ".png",
-            "image/webp": ".webp",
-            "image/gif": ".gif",
-        }
-        return suffixes.get(content_type, ".jpg")
+        body_text = f"作品配文：\n{work.caption or '无'}\n\n视频转录：\n{transcription.text}"
+        return body_text, transcription.warnings
 
     # 可选进度回调统一空值处理。
     @staticmethod

@@ -29,6 +29,19 @@ CONFIG_KEYS = (
     "KW_TENCENT_ASR_ENGINE_MODEL_TYPE",
     "KW_TENCENT_ASR_POLL_INTERVAL_SECONDS",
     "KW_TENCENT_ASR_MAX_WAIT_SECONDS",
+    "KW_ASR_PROVIDER",
+    "KW_TEMP_STORAGE_PROVIDER",
+    "KW_TEMP_LOCAL_ROOT",
+    "KW_TEMP_DELETE_AFTER_PROCESS",
+    "KW_FASTER_WHISPER_MODEL",
+    "KW_FASTER_WHISPER_MODEL_DIR",
+    "KW_FASTER_WHISPER_DEVICE",
+    "KW_FASTER_WHISPER_COMPUTE_TYPE",
+    "KW_FASTER_WHISPER_LANGUAGE",
+    "KW_FASTER_WHISPER_VAD_FILTER",
+    "KW_FASTER_WHISPER_BEAM_SIZE",
+    "KW_FASTER_WHISPER_CPU_THREADS",
+    "KW_FASTER_WHISPER_ALLOW_MODEL_DOWNLOAD",
     "KW_VISION_API_KEY",
     "KW_VISION_BASE_URL",
     "KW_VISION_MODEL",
@@ -102,6 +115,9 @@ def test_env_file_loads_generic_llm_without_tencentcloud(
     assert settings.llm.timeout_seconds == 120
     assert settings.llm.thinking_mode == "disabled"
     assert settings.tencentcloud is None
+    assert settings.asr_provider == "faster_whisper"
+    assert settings.temp_storage.provider == "local"
+    assert settings.temp_storage.delete_after_process is True
 
 
 # 进程环境变量应覆盖 .env，便于容器安全注入。
@@ -299,4 +315,88 @@ def test_database_url_is_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     )
 
     with pytest.raises(ValueError, match="KW_DATABASE_URL"):
+        AppSettings.load(env_file)
+
+
+# 用户可以选择本地 ASR、本地目录并保留临时文件用于调试。
+def test_env_file_loads_local_asr_and_temp_lifecycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证本地媒体配置。"""
+
+    for key in CONFIG_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    # 用户指定的临时目录。
+    temp_root = tmp_path / "media-temp"
+    # 本地 ASR 环境文件。
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "KW_FEISHU_APP_ID=cli_test",
+                "KW_FEISHU_APP_SECRET=feishu-secret",
+                "KW_LLM_API_KEY=llm-secret",
+                "KW_LLM_BASE_URL=https://llm.example/v1",
+                "KW_LLM_MODEL=test-model",
+                "KW_DATABASE_URL=postgresql+psycopg://localhost/knowwhere",
+                "KW_ASR_PROVIDER=faster_whisper",
+                "KW_TEMP_STORAGE_PROVIDER=local",
+                f"KW_TEMP_LOCAL_ROOT={temp_root}",
+                "KW_TEMP_DELETE_AFTER_PROCESS=false",
+                "KW_FASTER_WHISPER_MODEL=medium",
+                "KW_FASTER_WHISPER_DEVICE=cpu",
+                "KW_FASTER_WHISPER_COMPUTE_TYPE=int8",
+                "KW_FASTER_WHISPER_LANGUAGE=",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    # 已校验的本地媒体配置。
+    settings = AppSettings.load(env_file)
+
+    assert settings.asr_provider == "faster_whisper"
+    assert settings.temp_storage.provider == "local"
+    assert settings.temp_storage.local_root == temp_root
+    assert settings.temp_storage.delete_after_process is False
+    assert settings.faster_whisper.model == "medium"
+    assert settings.faster_whisper.device == "cpu"
+    assert settings.faster_whisper.compute_type == "int8"
+    assert settings.faster_whisper.language is None
+
+
+# 腾讯 ASR 不允许使用本地临时产物冒充 COS URL。
+def test_tencent_asr_rejects_local_temp_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证腾讯 ASR 与 COS 的强制组合。"""
+
+    for key in CONFIG_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    # 包含完整腾讯凭据但错误选择本地存储的环境文件。
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "KW_FEISHU_APP_ID=cli_test",
+                "KW_FEISHU_APP_SECRET=feishu-secret",
+                "KW_LLM_API_KEY=llm-secret",
+                "KW_LLM_BASE_URL=https://llm.example/v1",
+                "KW_LLM_MODEL=test-model",
+                "KW_DATABASE_URL=postgresql+psycopg://localhost/knowwhere",
+                "KW_ASR_PROVIDER=tencent",
+                "KW_TEMP_STORAGE_PROVIDER=local",
+                "KW_TENCENTCLOUD_APP_ID=1234567890",
+                "KW_TENCENTCLOUD_SECRET_ID=test-id",
+                "KW_TENCENTCLOUD_SECRET_KEY=test-key",
+                "KW_COS_REGION=ap-shanghai",
+                "KW_COS_BUCKET=test-1234567890",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError, match="只能搭配.*tencent_cos"):
         AppSettings.load(env_file)
