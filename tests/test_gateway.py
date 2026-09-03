@@ -90,6 +90,40 @@ def test_extract_douyin_short_url_from_text_message() -> None:
     assert extract_supported_url(content) == "https://v.douyin.com/UrtPieUOn5c/"
 
 
+# 小红书分享短链应完整传给安全跳转解析器。
+def test_extract_xiaohongshu_short_url_from_text_message() -> None:
+    """验证小红书图文或视频短链。"""
+
+    # 飞书文本消息 JSON。
+    content = json.dumps(
+        {"text": "请归档 https://xhslink.cn/o/1uQrX2eif3K。"},
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == "https://xhslink.cn/o/1uQrX2eif3K"
+
+
+# 小红书标准详情地址应保留访问详情所需的查询参数。
+def test_extract_xiaohongshu_detail_url_from_text_message() -> None:
+    """验证小红书详情链接。"""
+
+    # 飞书文本消息 JSON。
+    content = json.dumps(
+        {
+            "text": (
+                "看看 https://www.xiaohongshu.com/discovery/item/"
+                "6a8c08720000000028031d9b?xsec_token=test%3D。"
+            )
+        },
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == (
+        "https://www.xiaohongshu.com/discovery/item/"
+        "6a8c08720000000028031d9b?xsec_token=test%3D"
+    )
+
+
 # B站标准视频地址及分P参数应完整传给解析器。
 def test_extract_bilibili_video_url_from_text_message() -> None:
     """验证B站标准视频链接。"""

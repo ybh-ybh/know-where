@@ -440,7 +440,7 @@ ASR 供应商不负责长视频业务流程。核心 `TranscriptionOrchestrator`
 | --- | --- | --- |
 | 微信公众号 | 专用 DOM 规则 + 浏览器提取 | 通用 Crawl4AI |
 | 稀土掘金 | 公开页面/API 适配器 | 通用 Crawl4AI |
-| 小红书 | 独立适配器服务 | 云解析 API 或受控浏览器适配器 |
+| 小红书 | 分享短链 + 公开页面初始状态适配器 | 云解析 API 或受控浏览器适配器 |
 | 抖音 | 独立适配器服务 | 云解析 API 或受控浏览器适配器 |
 | B站 | 公开元数据与 DASH 音频适配器 | 外部工具适配器或受控浏览器 |
 | 其他网页 | Crawl4AI HTTP 适配器 | 自建 Playwright/Readability |
@@ -449,10 +449,12 @@ ASR 供应商不负责长视频业务流程。核心 `TranscriptionOrchestrator`
 
 B站当前只把视频语音作为总结事实输入：适配器通过公开详情接口取得 BV/CID/分P元数据，再从 DASH 音轨中选择最高带宽的匿名可访问轨道；流式 GET 失败时依次回退同轨 `backupUrl`。CDN 不保证正确响应 HEAD 请求，因此健康判断不能用 HEAD 替代真实 GET。音频 URL 具有时效性，只能用于当前提取调用，不进入检查点或持久化结果。
 
+小红书当前使用匿名公开页面路线：逐跳校验 `xhslink.cn`/`xhslink.com` 到官方详情页，从 `window.__INITIAL_STATE__` 的目标 `noteDetailMap` 读取字段。图文下载全部有序图片并复用视觉端口；视频选择最高分辨率流并复用 FFmpeg、COS 和 ASR 端口。页面访问令牌与 CDN 地址均为短期事实，只在单次调用内存中存在。
+
 ### 8.3 平台工具许可证边界
 
-- XHS-Downloader 与 TikTokDownloader 当前均为 GPL-3.0 候选项目。
-- 未决定本项目许可证前，不把它们直接链接进核心 Python 包。
+- XHS-Downloader 与 TikTokDownloader 当前均为 GPL-3.0 候选项目，MediaCrawler 使用非商业学习许可证。
+- 不把这些候选项目直接链接或复制进核心 Python 包；小红书当前实现只参考公开协议事实并独立实现。
 - 若使用，以独立适配器服务或用户自行安装的外部工具接入，但进程隔离不是规避许可证义务的手段。
 - 发布镜像或组合发行前必须做许可证兼容性审查。
 - 任何无明确许可证项目都不得复制代码进入仓库。
@@ -783,7 +785,10 @@ docs/
 | `KW_ARCHIVE_BOOTSTRAP_MODE` | `first_private_message` | 由首个可用范围内私聊用户完成个人绑定 |
 | `KW_EXTRACTOR_WECHAT` | `wechat_browser` | 微信公众号提取器 |
 | `KW_EXTRACTOR_JUEJIN` | `juejin_web` | 掘金提取器 |
-| `KW_EXTRACTOR_XHS` | `xhs_service` | 小红书提取器 |
+| `KW_XIAOHONGSHU_REQUEST_TIMEOUT_SECONDS` | `60` | 小红书页面与媒体请求超时 |
+| `KW_XIAOHONGSHU_MAX_IMAGE_BYTES` | `20971520` | 单张小红书图片大小上限 |
+| `KW_XIAOHONGSHU_MAX_VIDEO_BYTES` | `4294967296` | 单个小红书视频大小上限 |
+| `KW_XIAOHONGSHU_MAX_IMAGES` | `30` | 单篇小红书图文图片数量上限 |
 | `KW_EXTRACTOR_DOUYIN` | `douyin_service` | 抖音提取器 |
 | `KW_EXTRACTOR_GENERIC` | `crawl4ai_http` | 通用网页提取器 |
 | `KW_RECORD_ARCHIVE` | `feishu_bitable` | 元数据归档适配器 |

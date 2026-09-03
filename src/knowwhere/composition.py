@@ -25,6 +25,11 @@ from knowwhere.adapters.juejin import JuejinArticleExtractor
 from knowwhere.adapters.llm_openai import PromptFirstOpenAiCompatibleLlm
 from knowwhere.adapters.tencent_asr import TencentFileAsrProvider
 from knowwhere.adapters.wechat import WeChatArticleExtractor
+from knowwhere.adapters.xiaohongshu import (
+    XiaohongshuContentExtractor,
+    XiaohongshuMediaDownloader,
+    XiaohongshuWebResolver,
+)
 from knowwhere.application.pipeline import MvpPipeline, PipelineDependencies
 from knowwhere.config import AppSettings
 from knowwhere.infrastructure.database import Database
@@ -108,6 +113,16 @@ def build_runtime(config_path: Path | None = None) -> Runtime:
             asr=asr,
             audio_extractor=FfmpegAudioExtractor(settings.bilibili.ffmpeg_path),
         )
+        # 小红书图文和视频复用抖音已验证的视觉、FFmpeg、COS 与 ASR 能力。
+        xiaohongshu_extractor = XiaohongshuContentExtractor(
+            settings=settings.xiaohongshu,
+            resolver=XiaohongshuWebResolver(settings.xiaohongshu),
+            downloader=XiaohongshuMediaDownloader(settings.xiaohongshu),
+            artifact_store=artifact_store,
+            asr=asr,
+            vision=vision,
+            audio_extractor=FfmpegAudioExtractor(settings.xiaohongshu.ffmpeg_path),
+        )
         extractors.update(
             {
                 "v.douyin.com": douyin_extractor,
@@ -117,6 +132,10 @@ def build_runtime(config_path: Path | None = None) -> Runtime:
                 "www.bilibili.com": bilibili_extractor,
                 "m.bilibili.com": bilibili_extractor,
                 "b23.tv": bilibili_extractor,
+                "xiaohongshu.com": xiaohongshu_extractor,
+                "www.xiaohongshu.com": xiaohongshu_extractor,
+                "xhslink.cn": xiaohongshu_extractor,
+                "xhslink.com": xiaohongshu_extractor,
             }
         )
     # 内容平台分派器是应用层看到的唯一内容提取端口。

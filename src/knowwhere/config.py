@@ -199,6 +199,26 @@ class DouyinSettings(BaseModel):
     ffmpeg_path: str = "ffmpeg"
 
 
+# 小红书媒体下载和本地音频标准化配置。
+class XiaohongshuSettings(BaseModel):
+    """小红书公开笔记处理限制。"""
+
+    # 页面和媒体请求超时。
+    request_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    # 单张图片最大字节数。
+    max_image_bytes: int = Field(default=20 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
+    # 单个视频最大字节数。
+    max_video_bytes: int = Field(
+        default=4 * 1024 * 1024 * 1024,
+        ge=1024,
+        le=20 * 1024 * 1024 * 1024,
+    )
+    # 单篇笔记最大图片数量。
+    max_images: int = Field(default=30, ge=1, le=50)
+    # FFmpeg 可执行文件名或绝对路径。
+    ffmpeg_path: str = "ffmpeg"
+
+
 # B站媒体下载和本地音频标准化配置。
 class BilibiliSettings(BaseModel):
     """B站公开视频处理限制。"""
@@ -229,6 +249,8 @@ class AppSettings(BaseModel):
     vision: VisionModelSettings | None = None
     # 抖音媒体下载限制与工具路径。
     douyin: DouyinSettings = Field(default_factory=DouyinSettings)
+    # 小红书媒体下载限制与工具路径。
+    xiaohongshu: XiaohongshuSettings = Field(default_factory=XiaohongshuSettings)
     # B站媒体下载限制与工具路径。
     bilibili: BilibiliSettings = Field(default_factory=BilibiliSettings)
     # PostgreSQL 连接地址；必须由环境提供，禁止在代码中设置凭据默认值。
@@ -319,6 +341,19 @@ class AppSettings(BaseModel):
                     "KW_DOUYIN_MAX_VIDEO_BYTES", str(4 * 1024 * 1024 * 1024)
                 ),
                 "max_images": values.get("KW_DOUYIN_MAX_IMAGES", "30"),
+                "ffmpeg_path": values.get("KW_FFMPEG_PATH", "ffmpeg"),
+            },
+            "xiaohongshu": {
+                "request_timeout_seconds": values.get(
+                    "KW_XIAOHONGSHU_REQUEST_TIMEOUT_SECONDS", "60"
+                ),
+                "max_image_bytes": values.get(
+                    "KW_XIAOHONGSHU_MAX_IMAGE_BYTES", str(20 * 1024 * 1024)
+                ),
+                "max_video_bytes": values.get(
+                    "KW_XIAOHONGSHU_MAX_VIDEO_BYTES", str(4 * 1024 * 1024 * 1024)
+                ),
+                "max_images": values.get("KW_XIAOHONGSHU_MAX_IMAGES", "30"),
                 "ffmpeg_path": values.get("KW_FFMPEG_PATH", "ffmpeg"),
             },
             "bilibili": {

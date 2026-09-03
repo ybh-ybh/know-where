@@ -2,7 +2,7 @@
 
 让散落的信息各归其位。
 
-知归是一个仅供个人使用的 AI 信息归档工具。当前支持把公开微信公众号、稀土掘金文章、GitHub 仓库、抖音图文/视频和 B站视频发送给飞书机器人，自动提取正文、README、逐图视觉正文或视频转录，调用 OpenAI 兼容模型生成分类与摘要，并归档到系统创建的飞书多维表格。
+知归是一个仅供个人使用的 AI 信息归档工具。当前支持把公开微信公众号、稀土掘金文章、GitHub 仓库、小红书/抖音图文与视频和 B站视频发送给飞书机器人，自动提取正文、README、逐图视觉正文或视频转录，调用 OpenAI 兼容模型生成分类与摘要，并归档到系统创建的飞书多维表格。
 
 ## 当前能力
 
@@ -12,6 +12,8 @@
 - 微信公众号文章 UTF-8 正文、标题、作者和发布时间提取。
 - 稀土掘金文章 SSR Markdown/DOM 双路径正文、标题、作者和发布时间提取。
 - GitHub 公开仓库根目录 README Markdown 原文提取。
+- 小红书 `xhslink.cn`/`xhslink.com` 分享短链和标准详情链接还原，匿名解析公开页面初始状态中的图文或视频事实字段。
+- 小红书图文按原顺序处理全部图片；视频选择最高分辨率媒体流，并在首选 CDN 失败时回退同流备用地址。
 - 抖音分享短链还原、A-Bogus 作品详情解析，以及图文/视频事实字段分流。
 - 抖音图文全部图片经私有 COS 短时 URL 交给 GLM-4.6V 做有序 OCR 和视觉理解。
 - 抖音视频经 FFmpeg 标准化为单声道 16k MP3，并按 4 小时切成腾讯单任务安全分段，再由腾讯云录音文件识别顺序转录。
@@ -29,7 +31,9 @@
 
 ```text
 飞书私聊 / CLI
-  → 内容平台分派器（微信 / 掘金 / GitHub / 抖音 / B站）
+  → 内容平台分派器（微信 / 掘金 / GitHub / 小红书 / 抖音 / B站）
+  → 小红书图文：全部图片 → 私有 COS → GLM 视觉正文 → 清理
+  → 小红书视频：视频 → FFmpeg 音频 → 私有 COS → 腾讯 ASR → 清理
   → 抖音图文：全部图片 → 私有 COS → GLM 视觉正文 → 清理
   → 抖音视频：视频 → FFmpeg 音频 → 私有 COS → 腾讯 ASR → 清理
   → B站视频：DASH 音频 → FFmpeg 标准音频 → 私有 COS → 腾讯 ASR → 清理
@@ -39,7 +43,13 @@
   → PostgreSQL 完成快照
 ```
 
-业务流水线只依赖稳定端口。抖音和 B站提取器通过 `ArtifactStorePort`、`VisionProviderPort` 和 `AsrProviderPort` 使用外部能力；供应商选择集中在 `composition.py`，切换实现时不修改状态机。
+业务流水线只依赖稳定端口。小红书、抖音和 B站提取器通过 `ArtifactStorePort`、`VisionProviderPort` 和 `AsrProviderPort` 使用外部能力；供应商选择集中在 `composition.py`，切换实现时不修改状态机。
+
+### 小红书媒体提取策略
+
+小红书适配器逐跳校验并还原官方分享短链，从公开详情页的 `window.__INITIAL_STATE__` 读取笔记 ID、标题、作者、发布时间和媒体清单，不要求 Cookie，也不引入浏览器或平台签名算法。图文按页面顺序下载全部默认清晰度图片；视频在各编码流中选择最高分辨率流，并保留同流备用 CDN。访问令牌和短期媒体 URL 只参与当前提取，不进入规范 URL、数据库或日志。
+
+实现前参考了 [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader)、[MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) 和 [LittleCrawler](https://github.com/pbeenigg/LittleCrawler) 的公开页面与接口路线。前两者分别是 GPL-3.0 和非商业许可证，本项目没有复制或引入其代码；当前适配器使用项目现有依赖独立实现最小公开页面解析。
 
 ### B站媒体提取策略
 
@@ -52,7 +62,7 @@ B站适配器先通过公开 `view` 接口取得 BV、CID、标题、UP 主、�
 1. 安装 Python 3.12、[uv](https://docs.astral.sh/uv/) 和 Docker Desktop。
 2. 复制 `.env.example` 为 `.env`。
 3. 填入用户自建 PostgreSQL、飞书和一个 OpenAI 兼容 LLM 的必填配置。
-4. 抖音和 B站视频填写腾讯云 COS/ASR 配置；抖音图文还需填写独立的 `KW_VISION_*` 配置。
+4. 小红书/抖音图文和视频以及 B站视频需填写腾讯云 COS/ASR 配置；图文还需填写独立的 `KW_VISION_*` 配置。
 5. 确认飞书应用已经发布、启用机器人能力，并订阅 `im.message.receive_v1` 事件。
 
 `.env` 已被 Git 和 Docker 构建上下文忽略。不要把真实密钥写进镜像、日志、提交、Issue 或问题截图。Docker Compose 通过 `env_file` 在运行时注入配置，不把密钥复制进镜像。
@@ -73,6 +83,7 @@ uv run knowwhere init-feishu
 uv run knowwhere process "https://mp.weixin.qq.com/s/文章ID"
 uv run knowwhere process "https://juejin.cn/post/文章ID"
 uv run knowwhere process "https://github.com/Tencent/WeKnora"
+uv run knowwhere process "https://xhslink.cn/o/小红书分享码"
 uv run knowwhere process "https://v.douyin.com/抖音分享码/"
 uv run knowwhere process "https://www.bilibili.com/video/BV19v8x6uEh8/"
 ```
@@ -99,7 +110,7 @@ docker compose --profile gateway up -d gateway
 docker compose --profile gateway ps
 ```
 
-此时把公开微信公众号、稀土掘金文章、GitHub 仓库、抖音图文/视频或 B站视频链接私聊发送给机器人即可。Gateway 会先回复“已收到”，完成后回复飞书记录链接。
+此时把公开微信公众号、稀土掘金文章、GitHub 仓库、小红书/抖音图文或视频、B站视频链接私聊发送给机器人即可。Gateway 会先回复“已收到”，完成后回复飞书记录链接。
 
 容器内手工处理一篇文章：
 
@@ -121,7 +132,7 @@ docker compose --profile gateway down
 ```text
 src/knowwhere/domain/          领域对象与状态机
 src/knowwhere/application/     端口和处理流水线
-src/knowwhere/adapters/        微信、掘金、GitHub、抖音、B站、COS、视觉、ASR、LLM 与飞书适配器
+src/knowwhere/adapters/        微信、掘金、GitHub、小红书、抖音、B站、COS、视觉、ASR、LLM 与飞书适配器
 src/knowwhere/infrastructure/  PostgreSQL 映射与仓储
 alembic/                       数据库迁移
 tests/                         离线回归测试

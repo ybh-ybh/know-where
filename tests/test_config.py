@@ -38,6 +38,10 @@ CONFIG_KEYS = (
     "KW_DOUYIN_MAX_IMAGE_BYTES",
     "KW_DOUYIN_MAX_VIDEO_BYTES",
     "KW_DOUYIN_MAX_IMAGES",
+    "KW_XIAOHONGSHU_REQUEST_TIMEOUT_SECONDS",
+    "KW_XIAOHONGSHU_MAX_IMAGE_BYTES",
+    "KW_XIAOHONGSHU_MAX_VIDEO_BYTES",
+    "KW_XIAOHONGSHU_MAX_IMAGES",
     "KW_BILIBILI_REQUEST_TIMEOUT_SECONDS",
     "KW_BILIBILI_MAX_AUDIO_BYTES",
     "KW_FFMPEG_PATH",
@@ -202,6 +206,46 @@ def test_env_file_loads_bilibili_limits(
     assert settings.bilibili.request_timeout_seconds == 90
     assert settings.bilibili.max_audio_bytes == 12_345_678
     assert settings.bilibili.ffmpeg_path == "C:/tools/ffmpeg.exe"
+
+
+# 小红书使用独立请求和媒体限制，并复用全局 FFmpeg 路径。
+def test_env_file_loads_xiaohongshu_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证小红书媒体配置从扁平环境变量加载。"""
+
+    for key in CONFIG_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    # 包含小红书限制的最小环境文件。
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "KW_FEISHU_APP_ID=cli_test",
+                "KW_FEISHU_APP_SECRET=feishu-secret",
+                "KW_LLM_API_KEY=llm-secret",
+                "KW_LLM_BASE_URL=https://llm.example/v1",
+                "KW_LLM_MODEL=text-model",
+                "KW_XIAOHONGSHU_REQUEST_TIMEOUT_SECONDS=95",
+                "KW_XIAOHONGSHU_MAX_IMAGE_BYTES=2345678",
+                "KW_XIAOHONGSHU_MAX_VIDEO_BYTES=3456789",
+                "KW_XIAOHONGSHU_MAX_IMAGES=20",
+                "KW_FFMPEG_PATH=C:/tools/ffmpeg.exe",
+                "KW_DATABASE_URL=postgresql+psycopg://localhost/knowwhere",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    # 已校验配置。
+    settings = AppSettings.load(env_file)
+
+    assert settings.xiaohongshu.request_timeout_seconds == 95
+    assert settings.xiaohongshu.max_image_bytes == 2_345_678
+    assert settings.xiaohongshu.max_video_bytes == 3_456_789
+    assert settings.xiaohongshu.max_images == 20
+    assert settings.xiaohongshu.ffmpeg_path == "C:/tools/ffmpeg.exe"
 
 
 # 无效 LLM 地址必须在启动配置阶段失败，而不是等到首次付费请求。

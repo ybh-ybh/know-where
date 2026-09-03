@@ -104,7 +104,7 @@ def init_feishu(
 def process(
     url: Annotated[
         str,
-        typer.Argument(help="公开微信/掘金/GitHub 或抖音图文与视频 HTTPS 链接"),
+        typer.Argument(help="公开微信/掘金/GitHub、小红书/抖音图文与视频或 B站链接"),
     ],
     env_file: Annotated[
         Path | None,
