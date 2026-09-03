@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "知归 KnowWhere 内容归档数据流",
+    "output": "docs/diagrams/knowwhere-dataflow.html",
+    "viewBox": [
+      960,
+      560
+    ],
+    "locale": "zh-CN",
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    {
+      "label": "入口"
+    },
+    {
+      "label": "接收与任务"
+    },
+    {
+      "label": "内容提取"
+    },
+    {
+      "label": "AI 与归档"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "user",
+      "type": "frontend",
+      "label": "个人用户",
+      "sublabel": "飞书私聊 · 内容链接",
+      "stage": 0,
+      "row": 0,
+      "tag": "已授权 open_id"
+    },
+    {
+      "id": "cli",
+      "type": "backend",
+      "label": "CLI process",
+      "sublabel": "knowwhere process <URL>",
+      "stage": 0,
+      "row": 1,
+      "tag": "本地链路"
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "飞书 Gateway",
+      "sublabel": "长连接接收 · 状态回执",
+      "stage": 1,
+      "row": 0,
+      "tag": "im.message.receive_v1"
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "处理流水线 MvpPipeline",
+      "sublabel": "状态机推进 · 幂等去重",
+      "stage": 1,
+      "row": 1,
+      "tag": "提取 → 分析 → 归档",
+      "width": 168
+    },
+    {
+      "id": "pg",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "任务状态 · 检查点 · 快照",
+      "stage": 1,
+      "row": 2,
+      "tag": "内部事实源"
+    },
+    {
+      "id": "article",
+      "type": "backend",
+      "label": "文章提取",
+      "sublabel": "微信公众号 · 掘金 · GitHub",
+      "stage": 2,
+      "row": 0,
+      "tag": "正文 / README"
+    },
+    {
+      "id": "media",
+      "type": "backend",
+      "label": "抖音 / B站 提取",
+      "sublabel": "图文 OCR · DASH 音轨转录",
+      "stage": 2,
+      "row": 2,
+      "tag": "GLM-4.6V · 腾讯 ASR",
+      "width": 144
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "OpenAI 兼容 LLM",
+      "sublabel": "分类 · 标题 · 标签 · 摘要",
+      "stage": 3,
+      "row": 0,
+      "tag": "json_object + Pydantic"
+    },
+    {
+      "id": "bitable",
+      "type": "database",
+      "label": "飞书多维表格",
+      "sublabel": "「知归」记录 Upsert · 分类目录",
+      "stage": 3,
+      "row": 2,
+      "tag": "归档投影",
+      "width": 144
+    }
+  ],
+  "flows": [
+    {
+      "id": "f-user-gw",
+      "from": "user",
+      "to": "gateway",
+      "label": "私聊消息（内容链接）",
+      "classification": "p2p 事件",
+      "variant": "emphasis",
+      "labelAt": [
+        208,
+        200
+      ]
+    },
+    {
+      "id": "f-gw-pl",
+      "from": "gateway",
+      "to": "pipeline",
+      "label": "URL 提交 · 授权",
+      "classification": "后台线程",
+      "variant": "emphasis",
+      "labelAt": [
+        315,
+        200
+      ]
+    },
+    {
+      "id": "f-cli-pl",
+      "from": "cli",
+      "to": "pipeline",
+      "label": "URL 提交",
+      "classification": "本地命令",
+      "variant": "default"
+    },
+    {
+      "id": "f-pl-pg",
+      "from": "pipeline",
+      "to": "pg",
+      "label": "任务状态 · 检查点 · 结果快照",
+      "classification": "每阶段先写库",
+      "variant": "default",
+      "labelAt": [
+        290,
+        316
+      ]
+    },
+    {
+      "id": "f-pl-article",
+      "from": "pipeline",
+      "to": "article",
+      "label": "URL",
+      "classification": "微信 / 掘金 / GitHub",
+      "variant": "default"
+    },
+    {
+      "id": "f-pl-media",
+      "from": "pipeline",
+      "to": "media",
+      "label": "URL",
+      "classification": "抖音短链 / b23.tv",
+      "variant": "default"
+    },
+    {
+      "id": "f-article-llm",
+      "from": "article",
+      "to": "llm",
+      "label": "正文 / README",
+      "classification": "ExtractedContent",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        637.5,
+        130
+      ]
+    },
+    {
+      "id": "f-media-llm",
+      "from": "media",
+      "to": "llm",
+      "label": "OCR / 转录正文",
+      "classification": "图文视觉 · 视频语音",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f-llm-bitable",
+      "from": "llm",
+      "to": "bitable",
+      "label": "AI 结果 Upsert",
+      "classification": "content_id 幂等",
+      "variant": "emphasis",
+      "labelAt": [
+        695,
+        230
+      ]
+    },
+    {
+      "id": "f-bitable-llm",
+      "from": "bitable",
+      "to": "llm",
+      "label": "一级分类选项",
+      "classification": "允许分类集合",
+      "variant": "dashed",
+      "labelAt": [
+        795,
+        270
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "主处理链路",
+      "items": [
+        "飞书 Gateway 长连接与 CLI process 命令共用同一条 MvpPipeline 用例",
+        "流水线每阶段先写 PostgreSQL 状态再推进；提取进度只落无密钥检查点",
+        "按规范 URL 幂等去重：重复提交也进入明确的完成终态"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "媒体转录链",
+      "items": [
+        "视频经 FFmpeg 归一为单声道 16k MP3，按 4 小时切成腾讯单任务安全分段",
+        "媒体字节经私有 COS 临时对象中转（knowwhere-temp/），只签发短时只读 URL",
+        "成功与失败路径都会清理 COS 临时对象；抖音图文按原顺序交给 GLM-4.6V"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "AI 与归档约束",
+      "items": [
+        "分类集合取自飞书「一级分类」单选字段；LLM 使用提示词主约束 + few-shot + json_object + Pydantic",
+        "首轮非法 JSON 只做一次受限修复，仍失败则明确降级，绝不写入非法分类",
+        "飞书保留未经改写的原始标题；完成后向私聊回复归档记录链接"
+      ]
+    }
+  ]
+}
