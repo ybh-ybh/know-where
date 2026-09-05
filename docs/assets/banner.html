@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>知归 KnowWhere · Banner</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #E7E4DE;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      color: #111111;
+      -webkit-font-smoothing: antialiased;
+    }
+    .banner {
+      width: 1600px;
+      height: 720px;
+      background: #F3F1EC;
+      display: flex;
+      padding: 72px 80px;
+      position: relative;
+      overflow: hidden;
+    }
+    .left {
+      width: 52%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      z-index: 2;
+    }
+    .eyebrow {
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      color: #8A8680;
+      text-transform: uppercase;
+      margin-bottom: 32px;
+    }
+    .title-block { margin-bottom: 32px; }
+    .title-cn {
+      font-size: 108px;
+      line-height: 0.95;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+    .title-en {
+      font-size: 56px;
+      line-height: 1.05;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #2C2C2C;
+      margin-top: 8px;
+    }
+    .tagline {
+      max-width: 560px;
+      font-size: 20px;
+      line-height: 1.7;
+      color: #4A4742;
+      font-weight: 400;
+    }
+    .footer {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 14px;
+      color: #6B6862;
+    }
+    .logo-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: #111111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .logo-mark svg { width: 18px; height: 18px; }
+
+    .right {
+      width: 48%;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-start;
+      padding-top: 6px;
+      z-index: 2;
+    }
+    .chart-head {
+      margin-bottom: 10px;
+    }
+    .chart-head h3 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #111111;
+      margin-bottom: 6px;
+    }
+    .chart-head p {
+      font-size: 13px;
+      color: #8A8680;
+      letter-spacing: 0.04em;
+    }
+    .chart-wrap {
+      width: 760px;
+      height: 460px;
+      position: relative;
+    }
+    .chart-wrap svg {
+      width: 100%;
+      height: 100%;
+    }
+    .bottom-right {
+      font-size: 12px;
+      color: #A8A49C;
+      letter-spacing: 0.06em;
+      text-align: right;
+      line-height: 1.6;
+      margin-top: 8px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    <div class="left">
+      <div>
+        <div class="eyebrow">个人 AI 知识库 · 飞书机器人 · 自动归档</div>
+        <div class="title-block">
+          <div class="title-cn">知归</div>
+          <div class="title-en">KnowWhere</div>
+        </div>
+        <p class="tagline">
+          把微信公众号、稀土掘金、GitHub、小红书、抖音、B站的内容链接，<br>
+          自动提取、分类、总结，沉淀为可长期检索的个人知识资产。
+        </p>
+      </div>
+      <div class="footer">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 4L20 8.5V15.5L12 20L4 15.5V8.5L12 4Z" stroke="#F3F1EC" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M12 12V20" stroke="#F3F1EC" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 12L20 8.5" stroke="#F3F1EC" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 12L4 8.5" stroke="#F3F1EC" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span>Apache License 2.0</span>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="chart-head">
+        <h3>一条链接，一条知识记录。</h3>
+        <p>多平台提取 · AI 分类摘要 · 飞书多维表格 · PostgreSQL 快照</p>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart" viewBox="0 0 760 460" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E0DDD6" stroke-width="1"/>
+            </pattern>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#111111"/>
+            </marker>
+          </defs>
+          <rect width="760" height="460" fill="url(#grid)" opacity="0.6"/>
+
+          <!-- Pipeline arrows -->
+          <g stroke="#111111" stroke-width="2" marker-end="url(#arrow)">
+            <line x1="210" y1="192" x2="240" y2="192"/>
+            <line x1="390" y1="192" x2="420" y2="192"/>
+            <line x1="570" y1="192" x2="600" y2="192"/>
+          </g>
+
+          <!-- Nodes -->
+          <g font-size="14" font-weight="600" font-family="Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif">
+            <!-- Input -->
+            <rect x="60" y="160" width="150" height="64" rx="12" fill="#F3F1EC" stroke="#111111" stroke-width="1.5"/>
+            <text x="135" y="184" text-anchor="middle" fill="#111111">飞书私聊 / CLI</text>
+            <text x="135" y="204" text-anchor="middle" fill="#6B6862" font-size="11" font-weight="500">发送内容链接</text>
+
+            <!-- Extract -->
+            <rect x="240" y="160" width="150" height="64" rx="12" fill="#F3F1EC" stroke="#111111" stroke-width="1.5"/>
+            <text x="315" y="192" text-anchor="middle" fill="#111111" dominant-baseline="middle">内容平台提取</text>
+
+            <!-- AI -->
+            <rect x="420" y="160" width="150" height="64" rx="12" fill="#D94F3C" stroke="#D94F3C" stroke-width="1.5"/>
+            <text x="495" y="184" text-anchor="middle" fill="#FFFFFF">AI 分类</text>
+            <text x="495" y="204" text-anchor="middle" fill="#FFFFFF" font-size="12" font-weight="500">摘要 / 标签 / 关键观点</text>
+
+            <!-- Archive -->
+            <rect x="600" y="160" width="150" height="64" rx="12" fill="#F3F1EC" stroke="#111111" stroke-width="1.5"/>
+            <text x="675" y="184" text-anchor="middle" fill="#111111">写入飞书</text>
+            <text x="675" y="204" text-anchor="middle" fill="#111111">多维表格</text>
+          </g>
+
+          <!-- Supported platforms -->
+          <g font-size="12" fill="#6B6862" text-anchor="middle" font-family="Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif">
+            <text x="315" y="250">微信公众号 · 稀土掘金 · GitHub</text>
+            <text x="315" y="272">小红书 · 抖音 · B站</text>
+          </g>
+
+          <!-- Snapshot branch -->
+          <g>
+            <line x1="675" y1="224" x2="675" y2="300" stroke="#111111" stroke-width="2" marker-end="url(#arrow)"/>
+            <text x="685" y="266" font-size="12" fill="#6B6862" font-family="Inter, system-ui, sans-serif">任务快照</text>
+            <rect x="610" y="300" width="130" height="44" rx="10" fill="#111111"/>
+            <text x="675" y="327" text-anchor="middle" dominant-baseline="middle" fill="#F3F1EC" font-size="13" font-weight="600" font-family="Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif">PostgreSQL 快照</text>
+          </g>
+        </svg>
+      </div>
+      <div class="bottom-right">
+        KNOW-WHERE · AI KNOWLEDGE ARCHIVE<br>
+        让散落的信息汇聚起来，沉淀为自己的知识
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

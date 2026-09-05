@@ -1,3 +1,4 @@
+![知归 KnowWhere Banner](docs/assets/banner.png)
 # 知归（KnowWhere）
 
 > 让散落的信息汇聚起来，沉淀为自己的知识。
