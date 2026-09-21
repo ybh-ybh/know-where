@@ -5,6 +5,8 @@
 
 知归是一个面向个人使用的 AI 知识归档工具。把内容链接发送给飞书机器人，知归会自动完成内容提取、AI 分类与总结，并将结果沉淀到飞书多维表格中。
 
+KnowWhere: a self-hosted Feishu(Lark) bot that turns WeChat/Douyin/Xiaohongshu/Bilibili links into an AI-summarized knowledge base in Feishu Bitable.
+
 ## 为什么做知归
 
 在信息爆炸的时代，我们可以从微信公众号、技术社区、开源项目和内容平台持续获取高质量知识，但这些信息往往散落在收藏夹、聊天记录和不同 App 中：收藏很容易，回顾很困难；信息越来越多，真正沉淀下来的知识却很少。
