@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>知归 KnowWhere · 个人 AI 知识归档工具</title>
+  <meta name="description" content="知归（KnowWhere）是一个面向个人使用的 AI 知识归档工具。把内容链接发送给飞书机器人，自动完成内容提取、AI 分类与总结，沉淀到飞书多维表格。">
+  <style>
+    :root {
+      --bg: #F3F1EC;
+      --bg-deep: #E7E4DE;
+      --ink: #111111;
+      --ink-soft: #2C2C2C;
+      --muted: #6B6862;
+      --faint: #8A8680;
+      --line: #E0DDD6;
+      --accent: #D94F3C;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.6;
+    }
+    a { color: inherit; text-decoration: none; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(243, 241, 236, 0.85);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: -0.01em; }
+    .logo-mark {
+      width: 30px; height: 30px; border-radius: 8px; background: var(--ink);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo-mark svg { width: 16px; height: 16px; }
+    .nav-links { display: flex; align-items: center; gap: 26px; font-size: 14px; color: var(--muted); }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-cta {
+      padding: 8px 16px; border-radius: 8px; background: var(--ink); color: #F3F1EC;
+      font-weight: 600; transition: background .15s;
+    }
+    .nav-cta:hover { background: var(--ink-soft); }
+
+    .hero { padding: 88px 0 24px; }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 56px;
+      align-items: center;
+    }
+    .eyebrow {
+      font-size: 13px; font-weight: 500; letter-spacing: 0.14em;
+      color: var(--faint); text-transform: uppercase; margin-bottom: 24px;
+    }
+    .hero-title { font-size: 68px; line-height: 0.96; font-weight: 800; letter-spacing: -0.03em; }
+    .hero-sub { font-size: 34px; line-height: 1.05; font-weight: 600; letter-spacing: -0.02em; color: var(--ink-soft); margin-top: 10px; }
+    .hero-tag { margin-top: 28px; font-size: 19px; line-height: 1.7; color: #4A4742; max-width: 540px; }
+    .hero-actions { margin-top: 36px; display: flex; gap: 14px; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 22px; border-radius: 10px; font-weight: 600; font-size: 15px;
+      transition: transform .12s, background .15s;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary { background: var(--ink); color: #F3F1EC; }
+    .btn-primary:hover { background: var(--ink-soft); }
+    .btn-ghost { border: 1px solid var(--line); background: transparent; color: var(--ink); }
+    .btn-ghost:hover { border-color: var(--faint); }
+    .hero-visual {
+      background: var(--bg-deep);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .hero-visual img { display: block; width: 100%; height: auto; }
+
+    section { padding: 72px 0; }
+    .section-label {
+      font-size: 13px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--faint); margin-bottom: 12px;
+    }
+    .section-title { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+    .section-desc { margin-top: 14px; font-size: 17px; color: var(--muted); max-width: 640px; }
+
+    .platforms {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 36px;
+    }
+    .card {
+      background: #FFFDF8;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+    }
+    .card.num { font-size: 12px; color: var(--faint); letter-spacing: 0.05em; margin-bottom: 8px; }
+    .card h3 { font-size: 18px; font-weight: 700; }
+    .card p { margin-top: 6px; font-size: 14px; color: var(--muted); }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-top: 36px;
+    }
+    .step { position: relative; border-radius: var(--radius); padding: 22px; border: 1px solid var(--line); background: #FFFDF8; }
+    .step.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .step .idx { font-size: 12px; letter-spacing: 0.05em; opacity: .7; margin-bottom: 10px; }
+    .step h3 { font-size: 17px; font-weight: 700; }
+    .step.hot h3 { color: #fff; }
+    .step p { margin-top: 6px; font-size: 13.5px; color: var(--muted); }
+    .step.hot p { color: #fff; opacity: .92; }
+
+    .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 36px; }
+    .feature { border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; background: #FFFDF8; }
+    .feature h3 { font-size: 18px; font-weight: 700; }
+    .feature p { margin-top: 8px; font-size: 14.5px; color: var(--muted); }
+
+    .quickstart {
+      background: var(--ink);
+      color: #F3F1EC;
+      border-radius: 20px;
+      padding: 56px;
+    }
+    .quickstart h2 { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
+    .quickstart p { margin-top: 14px; color: #CFCBC2; font-size: 16px; max-width: 560px; }
+    .quickstart .btn { margin-top: 28px; background: #F3F1EC; color: var(--ink); }
+    .quickstart .btn:hover { background: var(--bg-deep); }
+    code {
+      font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+      font-size: 13px;
+      background: rgba(255,255,255,0.12);
+      padding: 2px 6px; border-radius: 5px;
+    }
+
+    footer { border-top: 1px solid var(--line); margin-top: 24px; }
+    .footer { display: flex; align-items: center; justify-content: space-between; padding: 28px 0; font-size: 14px; color: var(--muted); flex-wrap: wrap; gap: 12px; }
+    .footer .links { display: flex; gap: 20px; }
+    .footer .links a:hover { color: var(--ink); }
+
+    @media (max-width: 860px) {
+      .hero-grid { grid-template-columns: 1fr; }
+      .hero-title { font-size: 52px; }
+      .platforms, .pipeline, .features { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .platforms, .pipeline, .features { grid-template-columns: 1fr; }
+      .hero-title { font-size: 42px; }
+      .hero-sub { font-size: 26px; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <div class="brand">
+        <span class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 4L20 8.5V15.5L12 20L4 15.5V8.5L12 4Z" stroke="#F3F1EC" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M12 12V20" stroke="#F3F1EC" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 12L20 8.5" stroke="#F3F1EC" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 12L4 8.5" stroke="#F3F1EC" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span>知归 <span style="font-weight:500;color:var(--muted)">KnowWhere</span></span>
+      </div>
+      <nav class="nav-links">
+        <a href="#platforms">支持平台</a>
+        <a href="#pipeline">工作流程</a>
+        <a href="#features">核心能力</a>
+        <a href="#quickstart">快速开始</a>
+      </nav>
+      <a class="nav-cta" href="https://github.com/ybh-ybh/know-where" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="hero-grid">
+        <div class="hero-left">
+          <div class="eyebrow">个人 AI 知识库 · 飞书机器人 · 自动归档</div>
+          <div class="hero-title">知归</div>
+          <div class="hero-sub">KnowWhere</div>
+          <p class="hero-tag">
+            把微信公众号、稀土掘金、GitHub、小红书、抖音、B站的内容链接，
+            自动提取、分类、总结，沉淀为可长期检索的个人知识资产。
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#quickstart">开始使用</a>
+            <a class="btn btn-ghost" href="https://github.com/ybh-ybh/know-where" target="_blank" rel="noopener">查看源码</a>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <img src="assets/banner.png" alt="知归 KnowWhere 数据流示意">
+        </div>
+      </div>
+    </section>
+
+    <section id="platforms">
+      <div class="section-label">Sources</div>
+      <h2 class="section-title">支持的内容来源</h2>
+      <p class="section-desc">在飞书私聊发送公开内容链接，知归自动识别平台并提取正文、图文或语音。</p>
+      <div class="platforms">
+        <div class="card"><div class="num">01</div><h3>微信公众号</h3><p>提取标题、作者、发布时间和正文</p></div>
+        <div class="card"><div class="num">02</div><h3>稀土掘金</h3><p>提取标题、作者、发布时间和正文</p></div>
+        <div class="card"><div class="num">03</div><h3>GitHub</h3><p>提取公开仓库默认分支根 README</p></div>
+        <div class="card"><div class="num">04</div><h3>小红书</h3><p>图文按顺序视觉理解，视频提取音频转录</p></div>
+        <div class="card"><div class="num">05</div><h3>抖音</h3><p>图文视觉理解，视频提取音频转录</p></div>
+        <div class="card"><div class="num">06</div><h3>B站</h3><p>下载 DASH 音轨并转录，支持分享短链与分 P</p></div>
+      </div>
+    </section>
+
+    <section id="pipeline">
+      <div class="section-label">Workflow</div>
+      <h2 class="section-title">一条链接，一条知识记录</h2>
+      <p class="section-desc">从发送链接到归档，完整的自动处理链路。</p>
+      <div class="pipeline">
+        <div class="step"><div class="idx">01</div><h3>发送链接</h3><p>飞书私聊或 CLI 发送内容链接</p></div>
+        <div class="step"><div class="idx">02</div><h3>平台提取</h3><p>识别平台，提取正文、README、图文或语音</p></div>
+        <div class="step hot"><div class="idx">03</div><h3>AI 分类</h3><p>生成标题、分类、标签、摘要与关键观点</p></div>
+        <div class="step"><div class="idx">04</div><h3>写入飞书</h3><p>归档到多维表格，PostgreSQL 保存快照</p></div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="section-label">Highlights</div>
+      <h2 class="section-title">核心能力</h2>
+      <p class="section-desc">为个人知识沉淀设计，稳定、可替换、隐私友好。</p>
+      <div class="features">
+        <div class="feature">
+          <h3>飞书长连接</h3>
+          <p>通过飞书官方 SDK 建立长连接，无需公网域名或 Webhook 回调地址。</p>
+        </div>
+        <div class="feature">
+          <h3>幂等归档</h3>
+          <p>使用规范化链接和平台内容 ID 去重，避免重复归档。</p>
+        </div>
+        <div class="feature">
+          <h3>AI 输出校验</h3>
+          <p>AI 结果经 JSON Schema 校验；格式出错自动修复一次，失败则明确降级。</p>
+        </div>
+        <div class="feature">
+          <h3>视觉理解与转录</h3>
+          <p>支持图文视觉理解与视频语音转录，本地 faster-whisper 可无云端 ASR 凭据。</p>
+        </div>
+        <div class="feature">
+          <h3>自定义分类</h3>
+          <p>直接读取飞书「一级分类」字段选项，随时扩展自己的分类体系。</p>
+        </div>
+        <div class="feature">
+          <h3>阅读状态管理</h3>
+          <p>新内容默认「未读」，支持收件箱、未读、按分类浏览等视图。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="quickstart">
+      <div class="quickstart">
+        <h2>开始使用</h2>
+        <p>推荐使用 Docker Compose 部署。准备一个 PostgreSQL 数据库、一个飞书企业自建应用，以及一个 OpenAI 兼容的文本模型即可。</p>
+        <a class="btn" href="https://github.com/ybh-ybh/know-where#最小启动方式" target="_blank" rel="noopener">查看完整部署文档</a>
+        <p style="margin-top:28px;font-size:14px;color:#8f8b83;">
+          配置示例：<code>KW_DATABASE_URL</code> · <code>KW_FEISHU_APP_ID</code> · <code>KW_LLM_API_KEY</code> · <code>KW_LLM_MODEL</code>
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="wrap footer">
+      <span>知归 KnowWhere · 让散落的信息汇聚起来</span>
+      <div class="links">
+        <a href="https://github.com/ybh-ybh/know-where" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/ybh-ybh/know-where/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

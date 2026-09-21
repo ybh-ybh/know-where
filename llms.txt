@@ -1,0 +1,37 @@
+# know-where
+
+> 知归（KnowWhere）是一个面向个人使用的 AI 知识归档工具。把内容链接
+> （微信公众号、稀土掘金、GitHub、小红书、抖音、B站）发给飞书机器人，
+> 知归自动完成内容提取、AI 分类与总结，并将结果沉淀到飞书多维表格中。
+>
+> KnowWhere is a self-hosted personal knowledge-archive tool. Send a link
+> (WeChat Official Account / Juejin / GitHub / Xiaohongshu / Douyin /
+> Bilibili) to a Feishu (Lark) bot; it auto-extracts content, runs
+> AI classification & summarization, and archives results into Feishu
+> Bitable (knowledge base / second brain).
+
+## Overview
+
+- **一句话定位**：飞书私聊发链接 → 自动提取 → AI 总结 → 归档到飞书多维表格。
+- **支持平台**：微信公众号、稀土掘金、GitHub、小红书、抖音、B站。
+- **技术栈**：Python 3.12、uv、PostgreSQL、Alembic、飞书官方 SDK（长连接，无需公网/Webhook）、OpenAI 兼容 LLM、可选视觉模型、faster-whisper 或腾讯云 ASR 转写、Docker Compose。
+- **License**：Apache-2.0。
+
+## Quick Start
+
+- [README](README.md)：项目总览与最小启动说明。
+- [飞书应用配置指南](docs/FEISHU_SETUP.md)：创建企业自建应用、申请权限、事件订阅（长连接）。
+
+## 关键能力 / Key Facts
+
+- 内容归档幂等：使用规范化链接与平台内容 ID 去重。
+- AI 输出经 JSON Schema 校验，格式错误会尝试一次修复，失败则降级。
+- 支持图文视觉理解（小红书/抖音）与视频语音转录（B站/抖音）。
+- 本地 faster-whisper 无需云端 ASR 凭据，也可切换腾讯云录音文件识别。
+- 新内容默认"未读"，可在飞书中维护阅读状态与阅读时间。
+
+## Similar / Related Keywords
+
+feishu, lark, feishu-bot, wechat2rss, rsshub, wechat-mp, douyin,
+xiaohongshu, bilibili, juejin, second-brain, knowledge-management,
+content-archive, ai-summarization, llm, bitable, self-hosted
