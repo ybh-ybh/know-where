@@ -15,6 +15,12 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /uvx /bin/
 ARG DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.cloud.tencent.com/debian-security
 
+# 默认使用腾讯云 PyPI 镜像，并提高慢速网络下的下载容错能力。
+ARG UV_DEFAULT_INDEX=https://mirrors.cloud.tencent.com/pypi/simple
+ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX} \
+    UV_HTTP_RETRIES=5 \
+    UV_HTTP_TIMEOUT=120
+
 # FFmpeg 是视频音频标准化的运行时依赖；系统用户在复制项目文件前固定创建。
 RUN sed -i \
         -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
@@ -36,15 +42,21 @@ RUN sed -i \
     mkdir --parents /var/lib/knowwhere/temp /var/lib/knowwhere/models && \
     chown --recursive knowwhere:knowwhere /var/lib/knowwhere
 
-COPY pyproject.toml uv.lock README.md ./
-COPY LICENSE THIRD_PARTY_NOTICES.md ./
+COPY pyproject.toml uv.lock ./
+
+# 先安装锁文件中的生产依赖，使源码变更不会让第三方依赖层失效。
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+COPY README.md LICENSE THIRD_PARTY_NOTICES.md ./
 COPY third_party_licenses ./third_party_licenses
 COPY src ./src
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-# 使用锁文件安装生产依赖并编译字节码。
-RUN uv sync --frozen --no-dev
+# 安装当前项目并复用 uv 下载缓存；生产依赖已在上一层完成安装。
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 USER knowwhere
 
 ENTRYPOINT ["/app/.venv/bin/knowwhere"]
