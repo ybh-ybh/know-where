@@ -375,7 +375,6 @@ dependencies = [
     { name = "alembic" },
     { name = "beautifulsoup4" },
     { name = "cos-python-sdk-v5" },
-    { name = "faster-whisper" },
     { name = "gmssl" },
     { name = "httpx" },
     { name = "lark-oapi" },
@@ -386,6 +385,11 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "tencentcloud-sdk-python-asr" },
     { name = "typer" },
+]
+
+[package.optional-dependencies]
+local-asr = [
+    { name = "faster-whisper" },
 ]
 
 [package.dev-dependencies]
@@ -402,7 +406,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
     { name = "beautifulsoup4", specifier = ">=4.13,<5" },
     { name = "cos-python-sdk-v5", specifier = ">=1.9,<2" },
-    { name = "faster-whisper", specifier = ">=1.2,<2" },
+    { name = "faster-whisper", marker = "extra == 'local-asr'", specifier = ">=1.2,<2" },
     { name = "gmssl", specifier = ">=3.2,<4" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "lark-oapi", specifier = ">=1.4,<2" },
@@ -414,6 +418,7 @@ requires-dist = [
     { name = "tencentcloud-sdk-python-asr", specifier = ">=3.0,<4" },
     { name = "typer", specifier = ">=0.16,<1" },
 ]
+provides-extras = ["local-asr"]
 
 [package.metadata.requires-dev]
 dev = [

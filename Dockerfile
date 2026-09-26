@@ -21,6 +21,9 @@ ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX} \
     UV_HTTP_RETRIES=5 \
     UV_HTTP_TIMEOUT=120
 
+# 构建期 ASR 选择由 Compose 从 .env 传入，并决定是否安装本地推理 extra。
+ARG KW_ASR_PROVIDER=faster_whisper
+
 # FFmpeg 是视频音频标准化的运行时依赖；系统用户在复制项目文件前固定创建。
 RUN sed -i \
         -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
@@ -46,7 +49,11 @@ COPY pyproject.toml uv.lock ./
 
 # 先安装锁文件中的生产依赖，使源码变更不会让第三方依赖层失效。
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    case "${KW_ASR_PROVIDER}" in \
+        faster_whisper) uv sync --frozen --no-dev --no-install-project --extra local-asr ;; \
+        tencent) uv sync --frozen --no-dev --no-install-project ;; \
+        *) echo "不支持的 KW_ASR_PROVIDER: ${KW_ASR_PROVIDER}" >&2; exit 1 ;; \
+    esac
 
 COPY README.md LICENSE THIRD_PARTY_NOTICES.md ./
 COPY third_party_licenses ./third_party_licenses
@@ -56,7 +63,11 @@ COPY alembic ./alembic
 
 # 安装当前项目并复用 uv 下载缓存；生产依赖已在上一层完成安装。
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    case "${KW_ASR_PROVIDER}" in \
+        faster_whisper) uv sync --frozen --no-dev --extra local-asr ;; \
+        tencent) uv sync --frozen --no-dev ;; \
+        *) echo "不支持的 KW_ASR_PROVIDER: ${KW_ASR_PROVIDER}" >&2; exit 1 ;; \
+    esac
 USER knowwhere
 
 ENTRYPOINT ["/app/.venv/bin/knowwhere"]

@@ -120,6 +120,10 @@ docker compose --profile gateway up -d gateway
 docker compose --profile gateway ps
 ```
 
+`docker compose build` 会读取 `.env` 中的 `KW_ASR_PROVIDER`：选择 `tencent` 时不安装
+`faster-whisper`、CTranslate2、ONNX Runtime 和 PyAV 等本地推理依赖；选择
+`faster_whisper` 时会安装完整的本地 ASR 依赖。修改该配置后必须重新构建镜像。
+
 打开飞书中的机器人私聊，发送一条受支持的内容链接。机器人会先回复接收状态，处理完成后返回飞书记录链接。
 
 查看运行日志：
@@ -216,11 +220,14 @@ uv run knowwhere health --env-file D:\config\knowwhere.env
 本地运行需要 Python 3.12 和 [uv](https://docs.astral.sh/uv/)。处理视频时还需要 FFmpeg。
 
 ```powershell
-uv sync --all-groups
+uv sync --all-groups --extra local-asr
 uv run knowwhere migrate-and-health
 uv run knowwhere init-feishu
 uv run knowwhere gateway
 ```
+
+以上命令适用于默认的本地 ASR。仅使用腾讯云 ASR 时可执行 `uv sync --all-groups`，
+无需安装 `local-asr` 可选依赖。
 
 常用命令：
 
