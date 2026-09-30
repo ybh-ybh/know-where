@@ -39,7 +39,7 @@ DEFAULT_CATEGORIES: Final[tuple[str, ...]] = (
 )
 
 # 当前由应用管理的多维表格 Schema 版本。
-SCHEMA_VERSION: Final[int] = 4
+SCHEMA_VERSION: Final[int] = 5
 
 # 飞书多维表格的数据表名称。
 TABLE_NAME: Final[str] = "内容库"
@@ -61,6 +61,9 @@ READ_STATUS_FIELD: Final[str] = "阅读状态"
 
 # 用户可填写的阅读时间字段名称。
 READING_TIME_FIELD: Final[str] = "阅读时间"
+
+# 用户可填写的阅读笔记字段名称。
+READING_NOTES_FIELD: Final[str] = "阅读笔记"
 
 # 新归档内容的默认阅读状态。
 DEFAULT_READ_STATUS: Final[str] = "未读"
@@ -103,8 +106,6 @@ FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
     FieldDefinition("作者", 1),
     FieldDefinition("原发布时间", 5, date_formatter="yyyy/MM/dd HH:mm"),
     FieldDefinition("收藏时间", 5, date_formatter="yyyy/MM/dd HH:mm"),
-    FieldDefinition(READ_STATUS_FIELD, 3, READ_STATUS_OPTIONS),
-    FieldDefinition(READING_TIME_FIELD, 5, date_formatter="yyyy/MM/dd HH:mm"),
     FieldDefinition("一级分类", 3, DEFAULT_CATEGORIES),
     FieldDefinition("分类置信度", 2, formatter="0.0000"),
     FieldDefinition("标签", 4),
@@ -112,6 +113,9 @@ FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
     FieldDefinition("详细摘要", 1),
     FieldDefinition("关键观点", 1),
     FieldDefinition("完整正文/转录", 1),
+    FieldDefinition(READ_STATUS_FIELD, 3, READ_STATUS_OPTIONS),
+    FieldDefinition(READING_TIME_FIELD, 5, date_formatter="yyyy/MM/dd HH:mm"),
+    FieldDefinition(READING_NOTES_FIELD, 1),
     FieldDefinition("全文保存方式", 3, ("多维表格字段", "飞书文档", "仅元数据")),
     FieldDefinition("飞书全文文档", 15),
     FieldDefinition("内容质量", 3, ("完整", "部分", "仅元数据")),
@@ -152,15 +156,31 @@ INBOX_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     "内容类型",
     "作者",
     READ_STATUS_FIELD,
+    READING_NOTES_FIELD,
     "一级分类",
     "一句话摘要",
     "详细摘要",
     "关键观点",
 )
 
-# 未读和按分类浏览视图额外保留用户填写的阅读时间。
-PREVIEW_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
+# 未读视图额外保留用户填写的阅读时间。
+UNREAD_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     *INBOX_VISIBLE_FIELDS,
+    READING_TIME_FIELD,
+)
+
+# 按分类浏览视图保留阅读时间，但不展示阅读笔记。
+CATEGORY_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
+    TITLE_FIELD,
+    "原始链接",
+    "平台",
+    "内容类型",
+    "作者",
+    READ_STATUS_FIELD,
+    "一级分类",
+    "一句话摘要",
+    "详细摘要",
+    "关键观点",
     READING_TIME_FIELD,
 )
 
@@ -213,11 +233,11 @@ class ViewDefinition:
     resolve_option_ids: bool = True
 
 
-# Schema v4 的默认视图集合。
+# Schema v5 的默认视图集合。
 VIEW_DEFINITIONS: Final[tuple[ViewDefinition, ...]] = (
     ViewDefinition(DEFAULT_VIEW_NAME, INBOX_VISIBLE_FIELDS),
-    ViewDefinition("未读", PREVIEW_VISIBLE_FIELDS, READ_STATUS_FIELD, (DEFAULT_READ_STATUS,)),
-    ViewDefinition("按分类浏览", PREVIEW_VISIBLE_FIELDS),
+    ViewDefinition("未读", UNREAD_VISIBLE_FIELDS, READ_STATUS_FIELD, (DEFAULT_READ_STATUS,)),
+    ViewDefinition("按分类浏览", CATEGORY_VISIBLE_FIELDS),
     ViewDefinition(
         "待处理与处理中",
         DEFAULT_VISIBLE_FIELDS,
@@ -421,7 +441,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
         analysis: AnalysisResult,
         collected_at: datetime,
     ) -> dict[str, Any]:
-        """构造一条 Schema v4 归档记录。"""
+        """构造一条 Schema v5 归档记录。"""
 
         # 非完整证据或启发式分析都属于可见的部分成功。
         processing_status = (
@@ -517,7 +537,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             if not tables:
                 raise RuntimeError("飞书新建多维表格没有默认数据表")
             default_table_id = str(tables[0].get("table_id", ""))
-        # Schema v4 表结构由创建接口原子写入，不保留飞书自带的空白字段。
+        # Schema v5 表结构由创建接口原子写入，不保留飞书自带的空白字段。
         table_data = self._request_json(
             "POST",
             f"/open-apis/bitable/v1/apps/{app_token}/tables",
@@ -664,7 +684,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
 
     # 幂等补齐系统视图，并管理字段可见性与公开 API 支持的筛选。
     def _ensure_views(self, binding: WorkspaceBinding) -> None:
-        """补齐并配置 Schema v4 视图。"""
+        """补齐并配置 Schema v5 视图。"""
 
         # 远端字段集合。
         fields = self._list_fields(binding)

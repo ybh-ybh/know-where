@@ -1,4 +1,4 @@
-"""飞书多维表格 Schema v4 与记录映射测试。"""
+"""飞书多维表格 Schema v5 与记录映射测试。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from knowwhere.adapters.feishu_bitable import (
     ORIGINAL_TITLE_FIELD,
     READ_STATUS_FIELD,
     READ_STATUS_OPTIONS,
+    READING_NOTES_FIELD,
     READING_TIME_FIELD,
     TITLE_FIELD,
     VIEW_DEFINITIONS,
@@ -69,7 +70,7 @@ def _binding() -> WorkspaceBinding:
         table_id="table_test",
         primary_field_name=TITLE_FIELD,
         workspace_url="https://feishu.cn/base/app_test",
-        schema_version=4,
+        schema_version=5,
     )
 
 
@@ -107,8 +108,8 @@ def _analysis() -> AnalysisResult:
     )
 
 
-# Schema v4 必须使用双标题和相邻的阅读状态、阅读时间字段。
-def test_schema_v4_uses_titles_and_reading_fields() -> None:
+# Schema v5 必须把三个阅读字段按顺序放在完整正文之后。
+def test_schema_v5_uses_ordered_reading_fields() -> None:
     """验证字段集合和阅读状态定义。"""
 
     # 声明字段名称。
@@ -121,15 +122,24 @@ def test_schema_v4_uses_titles_and_reading_fields() -> None:
     reading_time = next(
         definition for definition in FIELD_DEFINITIONS if definition.name == READING_TIME_FIELD
     )
+    # 阅读笔记字段定义。
+    reading_notes = next(
+        definition for definition in FIELD_DEFINITIONS if definition.name == READING_NOTES_FIELD
+    )
     # 平台字段应支持 GitHub 仓库 README 与B站视频。
     platform = next(definition for definition in FIELD_DEFINITIONS if definition.name == "平台")
 
     assert field_names[:2] == (TITLE_FIELD, ORIGINAL_TITLE_FIELD)
-    assert field_names.index(READING_TIME_FIELD) == field_names.index(READ_STATUS_FIELD) + 1
+    assert field_names[field_names.index("完整正文/转录") + 1 :][:3] == (
+        READ_STATUS_FIELD,
+        READING_TIME_FIELD,
+        READING_NOTES_FIELD,
+    )
     assert read_status.field_type == 3
     assert read_status.options == READ_STATUS_OPTIONS == ("未读", "已读")
     assert reading_time.field_type == 5
     assert reading_time.date_formatter == "yyyy/MM/dd HH:mm"
+    assert reading_notes.field_type == 1
     assert "GitHub" in platform.options
     assert "B站" in platform.options
     assert "单选" not in field_names
@@ -187,7 +197,7 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
 
     # 固定收藏时间。
     collected_at = datetime(2026, 8, 28, 9, 30, tzinfo=UTC)
-    # Schema v4 记录映射。
+    # Schema v5 记录映射。
     fields = _adapter()._record_fields(
         _binding(),
         "cnt_test",
@@ -201,6 +211,7 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
     assert fields[ORIGINAL_TITLE_FIELD] == "测试文章"
     assert fields[READ_STATUS_FIELD] == DEFAULT_READ_STATUS
     assert READING_TIME_FIELD not in fields
+    assert READING_NOTES_FIELD not in fields
     assert fields["原始链接"] == {
         "link": "https://mp.weixin.qq.com/s/source-id",
         "text": "查看原文",
@@ -336,6 +347,10 @@ def test_view_definitions_use_compact_field_sets() -> None:
     category_preview = next(item for item in VIEW_DEFINITIONS if item.name == "按分类浏览")
     # 系统信息视图声明。
     system_info = next(item for item in VIEW_DEFINITIONS if item.name == "系统信息")
+    # 除收件箱和未读之外的视图声明。
+    views_without_reading_notes = tuple(
+        item for item in VIEW_DEFINITIONS if item.name not in {"收件箱", "未读"}
+    )
     # 收件箱需要隐藏的字段。
     inbox_hidden_fields = {
         ORIGINAL_TITLE_FIELD,
@@ -358,6 +373,13 @@ def test_view_definitions_use_compact_field_sets() -> None:
     assert preview_hidden_fields.isdisjoint(category_preview.visible_fields)
     assert READING_TIME_FIELD in unread.visible_fields
     assert READING_TIME_FIELD in category_preview.visible_fields
+    assert READING_NOTES_FIELD in inbox.visible_fields
+    assert READING_NOTES_FIELD in unread.visible_fields
+    assert READING_NOTES_FIELD not in category_preview.visible_fields
+    assert all(
+        READING_NOTES_FIELD not in definition.visible_fields
+        for definition in views_without_reading_notes
+    )
     assert "内容质量" in system_info.visible_fields
     assert "状态说明" not in system_info.visible_fields
 
