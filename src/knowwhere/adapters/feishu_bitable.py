@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -291,6 +292,10 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
         self._tenant_token: str | None = None
         # 令牌提前一分钟刷新，避免请求途中到期。
         self._token_expires_at = 0.0
+        # 机器人 open_id 按进程缓存，用于识别应用身份所有的云文档。
+        self._application_open_id_cache: str | None = None
+        # 所有者读取与转移必须串行，避免并发首条消息重复转移。
+        self._permission_lock = threading.Lock()
 
     # 从飞书“一级分类”字段实时读取默认和用户自定义选项。
     def list_categories(self) -> tuple[str, ...]:
@@ -338,35 +343,58 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             self._binding_store.put(migrated_binding)
         return migrated_binding
 
-    # 将首次私聊用户设为多维表格管理协作者。
+    # 将应用所有的工作区交给首位私聊用户，其他用户仅增加管理权限。
     def grant_full_access(self, open_id: str) -> None:
         """授予指定飞书用户完整访问权限。"""
 
         if not open_id:
             raise ValueError("飞书 open_id 不能为空")
-        # 当前可用工作区。
-        binding = self.ensure_workspace()
-        # 当前协作者集合。
-        member_data = self._request_json(
-            "GET",
-            f"/open-apis/drive/v1/permissions/{binding.workspace_id}/members",
-            params={"type": "bitable"},
-        )
-        # 同一 open_id 的现有协作者。
-        existing_member = next(
-            (
-                item
-                for item in member_data.get("items") or []
-                if str(item.get("member_id", "")) == open_id
-            ),
-            None,
-        )
-        if existing_member is not None:
-            if existing_member.get("perm") == "full_access":
+        with self._permission_lock:
+            # 当前可用工作区。
+            binding = self.ensure_workspace()
+            # 元数据接口能区分真正所有者与 full_access 协作者。
+            owner_id = self._workspace_owner_id(binding)
+            if owner_id == open_id:
+                return
+            if owner_id == self._settings.app_id:
+                self._transfer_workspace_owner(binding, open_id)
+                return
+            # 部分 Drive 元数据把应用所有者表示为机器人 open_id。
+            if owner_id == self._application_open_id():
+                self._transfer_workspace_owner(binding, open_id)
+                return
+            # 当前协作者集合。
+            member_data = self._request_json(
+                "GET",
+                f"/open-apis/drive/v1/permissions/{binding.workspace_id}/members",
+                params={"type": "bitable"},
+            )
+            # 同一 open_id 的现有协作者。
+            existing_member = next(
+                (
+                    item
+                    for item in member_data.get("items") or []
+                    if str(item.get("member_id", "")) == open_id
+                ),
+                None,
+            )
+            if existing_member is not None:
+                if existing_member.get("perm") == "full_access":
+                    return
+                self._request_json(
+                    "PUT",
+                    f"/open-apis/drive/v1/permissions/{binding.workspace_id}/members/{open_id}",
+                    params={"type": "bitable", "need_notification": "false"},
+                    json={
+                        "member_type": "openid",
+                        "member_id": open_id,
+                        "perm": "full_access",
+                    },
+                )
                 return
             self._request_json(
-                "PUT",
-                f"/open-apis/drive/v1/permissions/{binding.workspace_id}/members/{open_id}",
+                "POST",
+                f"/open-apis/drive/v1/permissions/{binding.workspace_id}/members",
                 params={"type": "bitable", "need_notification": "false"},
                 json={
                     "member_type": "openid",
@@ -374,15 +402,76 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
                     "perm": "full_access",
                 },
             )
-            return
+
+    # 读取多维表格真正所有者，不用协作者角色猜测归属。
+    def _workspace_owner_id(self, binding: WorkspaceBinding) -> str:
+        """返回工作区所有者的 open_id 或应用 ID。"""
+
+        # 单资源元数据查询也使用批量接口。
+        metadata = self._request_json(
+            "POST",
+            "/open-apis/drive/v1/metas/batch_query",
+            params={"user_id_type": "open_id"},
+            json={"request_docs": [{"doc_token": binding.workspace_id, "doc_type": "bitable"}]},
+        )
+        # 目标工作区的元数据。
+        workspace_meta = next(
+            (
+                item
+                for item in metadata.get("metas") or []
+                if str(item.get("doc_token", "")) == binding.workspace_id
+            ),
+            None,
+        )
+        if workspace_meta is None:
+            raise RuntimeError("飞书工作区元数据缺失")
+        # 应用身份创建的资源返回 app_id，真人所有者返回 open_id。
+        owner_id = str(workspace_meta.get("owner_id", ""))
+        if not owner_id:
+            raise RuntimeError("飞书工作区元数据缺少 owner_id")
+        return owner_id
+
+    # 读取当前应用的机器人 open_id，兼容 Drive 对应用 owner 的两种 ID 表示。
+    def _application_open_id(self) -> str:
+        """返回当前飞书机器人的 open_id。"""
+
+        if self._application_open_id_cache is not None:
+            return self._application_open_id_cache
+        # 机器人信息接口使用顶层 bot 节点，不经通用 data 解包。
+        response = self._client.get(
+            "https://open.feishu.cn/open-apis/bot/v3/info",
+            headers={"Authorization": f"Bearer {self._access_token()}"},
+        )
+        response.raise_for_status()
+        # 顶层机器人信息响应。
+        payload = response.json()
+        self._raise_for_business_error(payload)
+        # 机器人身份对象。
+        bot = payload.get("bot") or {}
+        # 机器人在当前应用中的 open_id。
+        application_open_id = str(bot.get("open_id", ""))
+        if not application_open_id:
+            raise RuntimeError("飞书机器人信息缺少 open_id")
+        self._application_open_id_cache = application_open_id
+        return application_open_id
+
+    # 转移所有权后保留应用管理权，让用户能删除且机器人仍能归档。
+    def _transfer_workspace_owner(self, binding: WorkspaceBinding, open_id: str) -> None:
+        """把应用所有的工作区转移给飞书用户。"""
+
         self._request_json(
             "POST",
-            f"/open-apis/drive/v1/permissions/{binding.workspace_id}/members",
-            params={"type": "bitable", "need_notification": "false"},
+            f"/open-apis/drive/v1/permissions/{binding.workspace_id}/members/transfer_owner",
+            params={
+                "type": "bitable",
+                "need_notification": "false",
+                "remove_old_owner": "false",
+                "stay_put": "false",
+                "old_owner_perm": "full_access",
+            },
             json={
                 "member_type": "openid",
                 "member_id": open_id,
-                "perm": "full_access",
             },
         )
 

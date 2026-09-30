@@ -35,6 +35,7 @@ KnowWhere: a self-hosted Feishu(Lark) bot that turns WeChat/Douyin/Xiaohongshu/B
 
 - 通过飞书官方 SDK 建立长连接，无需公网域名或 Webhook 回调地址。
 - 自动创建并幂等维护“知归”多维表格、字段和常用视图。
+- 首次合法私聊时将表格所有权交给使用者，用户可在飞书中直接移动或删除归档空间。
 - 保存原始标题、原始链接、作者、发布时间、完整正文或转录等来源信息。
 - AI 生成简短标题、一级分类、标签、一句话摘要、详细摘要和关键观点。
 - 提供收件箱、未读、按分类浏览、待处理与处理中、全文、系统信息等视图。
@@ -81,6 +82,7 @@ KnowWhere: a self-hosted Feishu(Lark) bot that turns WeChat/Douyin/Xiaohongshu/B
 | `im:message.p2p_msg:readonly` | 接收发给机器人的私聊消息 |
 | `im:message:send_as_bot` | 回复处理状态和归档链接 |
 | `bitable:app` | 创建并维护多维表格与记录 |
+| `drive:drive.metadata:readonly` | 读取归档空间所有者，避免重复转移所有权 |
 | `docs:doc` | 管理归档所需的飞书文档能力 |
 | `docs:permission.member:create` | 将使用者添加为归档空间协作者；控制台未拆分该权限时无需单独选择 |
 

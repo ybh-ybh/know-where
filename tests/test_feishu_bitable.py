@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
+import httpx
 from pytest import MonkeyPatch
 
 from knowwhere.adapters.feishu_bitable import (
@@ -224,6 +225,169 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
     assert fields["处理次数"] == 1
     assert "状态说明" not in fields
     assert "内容指纹" not in fields
+
+
+# 应用身份所有的工作区必须转给首位私聊用户，而不只是增加协作者。
+def test_grant_full_access_transfers_app_owned_workspace(monkeypatch: MonkeyPatch) -> None:
+    """验证应用所有的多维表格会转移所有权。"""
+
+    # 待验证的飞书适配器。
+    adapter = _adapter()
+    # 避免授权测试触发 Schema 网络请求。
+    monkeypatch.setattr(adapter, "ensure_workspace", Mock(return_value=_binding()))
+    # 按调用顺序返回应用所有的元数据与转移结果。
+    request_json = Mock(
+        side_effect=(
+            {"metas": [{"doc_token": "app_test", "owner_id": "test_app"}]},
+            {},
+        )
+    )
+    monkeypatch.setattr(adapter, "_request_json", request_json)
+
+    adapter.grant_full_access("ou_user")
+
+    assert request_json.call_args_list == [
+        (
+            ("POST", "/open-apis/drive/v1/metas/batch_query"),
+            {
+                "params": {"user_id_type": "open_id"},
+                "json": {"request_docs": [{"doc_token": "app_test", "doc_type": "bitable"}]},
+            },
+        ),
+        (
+            (
+                "POST",
+                "/open-apis/drive/v1/permissions/app_test/members/transfer_owner",
+            ),
+            {
+                "params": {
+                    "type": "bitable",
+                    "need_notification": "false",
+                    "remove_old_owner": "false",
+                    "stay_put": "false",
+                    "old_owner_perm": "full_access",
+                },
+                "json": {"member_type": "openid", "member_id": "ou_user"},
+            },
+        ),
+    ]
+
+
+# Drive 返回机器人 open_id 作为 owner 时也必须识别为应用所有。
+def test_grant_full_access_transfers_bot_open_id_owned_workspace(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """验证机器人 open_id 形态的应用 owner 能被转移。"""
+
+    # 待验证的飞书适配器。
+    adapter = _adapter()
+    # 固定工作区与机器人身份。
+    monkeypatch.setattr(adapter, "ensure_workspace", Mock(return_value=_binding()))
+    monkeypatch.setattr(adapter, "_application_open_id", Mock(return_value="ou_bot"))
+    # 元数据的 owner_id 使用机器人 open_id。
+    request_json = Mock(
+        side_effect=(
+            {"metas": [{"doc_token": "app_test", "owner_id": "ou_bot"}]},
+            {},
+        )
+    )
+    monkeypatch.setattr(adapter, "_request_json", request_json)
+
+    adapter.grant_full_access("ou_user")
+
+    assert request_json.call_args_list[-1].args == (
+        "POST",
+        "/open-apis/drive/v1/permissions/app_test/members/transfer_owner",
+    )
+
+
+# 当前用户已是所有者时应直接返回，避免重复转移。
+def test_grant_full_access_is_idempotent_for_current_owner(monkeypatch: MonkeyPatch) -> None:
+    """验证已归用户所有的工作区不再修改权限。"""
+
+    # 待验证的飞书适配器。
+    adapter = _adapter()
+    # 固定工作区与元数据响应。
+    monkeypatch.setattr(adapter, "ensure_workspace", Mock(return_value=_binding()))
+    request_json = Mock(return_value={"metas": [{"doc_token": "app_test", "owner_id": "ou_user"}]})
+    monkeypatch.setattr(adapter, "_request_json", request_json)
+
+    adapter.grant_full_access("ou_user")
+
+    request_json.assert_called_once_with(
+        "POST",
+        "/open-apis/drive/v1/metas/batch_query",
+        params={"user_id_type": "open_id"},
+        json={"request_docs": [{"doc_token": "app_test", "doc_type": "bitable"}]},
+    )
+
+
+# 工作区已有真人所有者时，后续用户只获得管理协作权。
+def test_grant_full_access_does_not_replace_human_owner(monkeypatch: MonkeyPatch) -> None:
+    """验证多用户场景不会在真人之间反复转移所有权。"""
+
+    # 待验证的飞书适配器。
+    adapter = _adapter()
+    # 避免授权测试触发 Schema 网络请求。
+    monkeypatch.setattr(adapter, "ensure_workspace", Mock(return_value=_binding()))
+    monkeypatch.setattr(adapter, "_application_open_id", Mock(return_value="ou_bot"))
+    # 元数据显示另一位真人是所有者，当前用户尚非协作者。
+    request_json = Mock(
+        side_effect=(
+            {"metas": [{"doc_token": "app_test", "owner_id": "ou_owner"}]},
+            {"items": []},
+            {},
+        )
+    )
+    monkeypatch.setattr(adapter, "_request_json", request_json)
+
+    adapter.grant_full_access("ou_collaborator")
+
+    # 最后一次请求必须是增加协作者，不是转移所有者。
+    assert request_json.call_args_list[-1] == (
+        ("POST", "/open-apis/drive/v1/permissions/app_test/members"),
+        {
+            "params": {"type": "bitable", "need_notification": "false"},
+            "json": {
+                "member_type": "openid",
+                "member_id": "ou_collaborator",
+                "perm": "full_access",
+            },
+        },
+    )
+
+
+# 机器人信息接口的载荷位于顶层 bot 节点，不是常见的 data 节点。
+def test_application_open_id_reads_and_caches_top_level_bot_payload(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """验证机器人 open_id 解析与进程内缓存。"""
+
+    # 记录真实 HTTP 边界的请求次数。
+    request_count = 0
+
+    # 返回飞书 bot/v3/info 的顶层 bot 响应。
+    def handler(request: httpx.Request) -> httpx.Response:
+        """模拟机器人信息接口。"""
+
+        nonlocal request_count
+        request_count += 1
+        assert request.headers["Authorization"] == "Bearer tenant-token"
+        return httpx.Response(200, json={"code": 0, "msg": "success", "bot": {"open_id": "ou_bot"}})
+
+    # 注入无网络 MockTransport 的飞书适配器。
+    settings = FeishuSettings(app_id="test_app", app_secret="test_secret")
+    adapter = FeishuBitableAdapter(
+        settings,
+        _BindingStore(),
+        "test-model",
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr(adapter, "_access_token", Mock(return_value="tenant-token"))
+
+    assert adapter._application_open_id() == "ou_bot"
+    assert adapter._application_open_id() == "ou_bot"
+    assert request_count == 1
 
 
 # 数据库引用的记录 ID 只有仍出现在远端分页列表中才算有效。
