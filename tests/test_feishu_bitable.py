@@ -1,4 +1,4 @@
-"""飞书多维表格 Schema v2 与记录映射测试。"""
+"""飞书多维表格 Schema v4 与记录映射测试。"""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def _binding() -> WorkspaceBinding:
         table_id="table_test",
         primary_field_name=TITLE_FIELD,
         workspace_url="https://feishu.cn/base/app_test",
-        schema_version=3,
+        schema_version=4,
     )
 
 
@@ -107,8 +107,8 @@ def _analysis() -> AnalysisResult:
     )
 
 
-# Schema v3 必须使用双标题和相邻的阅读状态、阅读时间字段。
-def test_schema_v3_uses_titles_and_reading_fields() -> None:
+# Schema v4 必须使用双标题和相邻的阅读状态、阅读时间字段。
+def test_schema_v4_uses_titles_and_reading_fields() -> None:
     """验证字段集合和阅读状态定义。"""
 
     # 声明字段名称。
@@ -136,6 +136,7 @@ def test_schema_v3_uses_titles_and_reading_fields() -> None:
     assert "日期" not in field_names
     assert "附件" not in field_names
     assert "内容指纹" not in field_names
+    assert "状态说明" not in field_names
 
 
 # 已有工作区必须补齐 GitHub 与B站平台选项，同时保留用户自定义选项。
@@ -186,7 +187,7 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
 
     # 固定收藏时间。
     collected_at = datetime(2026, 8, 28, 9, 30, tzinfo=UTC)
-    # Schema v3 记录映射。
+    # Schema v4 记录映射。
     fields = _adapter()._record_fields(
         _binding(),
         "cnt_test",
@@ -210,7 +211,7 @@ def test_record_fields_use_typed_values_and_default_unread() -> None:
     assert fields["分类置信度"] == 0.875
     assert fields["标签"] == ["AI", "知识管理"]
     assert fields["处理次数"] == 1
-    assert fields["状态说明"] == "正文包含一处提取警告"
+    assert "状态说明" not in fields
     assert "内容指纹" not in fields
 
 
@@ -321,37 +322,47 @@ def test_unread_view_filter_uses_remote_option_id() -> None:
     }
 
 
-# 低置信度视图必须把阈值编码为飞书数字筛选值。
-def test_low_confidence_view_filter_uses_numeric_literal() -> None:
-    """验证数字筛选请求格式。"""
+# 默认视图集合必须移除冗余视图并按场景隐藏字段。
+def test_view_definitions_use_compact_field_sets() -> None:
+    """验证默认视图集合与字段可见性。"""
 
-    # 低置信度视图声明。
-    definition = next(item for item in VIEW_DEFINITIONS if item.name == "低置信度")
-    # 模拟飞书数字字段回读对象。
-    fields_by_name = {
-        "分类置信度": {
-            "field_id": "fld_confidence",
-            "field_name": "分类置信度",
-            "type": 2,
-        }
+    # 默认创建的视图名称。
+    view_names = tuple(definition.name for definition in VIEW_DEFINITIONS)
+    # 收件箱视图声明。
+    inbox = next(item for item in VIEW_DEFINITIONS if item.name == "收件箱")
+    # 未读视图声明。
+    unread = next(item for item in VIEW_DEFINITIONS if item.name == "未读")
+    # 按分类浏览视图声明。
+    category_preview = next(item for item in VIEW_DEFINITIONS if item.name == "按分类浏览")
+    # 系统信息视图声明。
+    system_info = next(item for item in VIEW_DEFINITIONS if item.name == "系统信息")
+    # 收件箱需要隐藏的字段。
+    inbox_hidden_fields = {
+        ORIGINAL_TITLE_FIELD,
+        "原发布时间",
+        READING_TIME_FIELD,
+        "收藏时间",
+        "标签",
+        "内容质量",
+        "处理状态",
+        "飞书全文文档",
     }
-    # 飞书数字视图筛选属性。
-    filter_info = FeishuBitableAdapter._view_filter_info(definition, fields_by_name)
+    # 预览类视图需要隐藏的字段。
+    preview_hidden_fields = inbox_hidden_fields - {READING_TIME_FIELD}
 
-    assert filter_info == {
-        "conjunction": "and",
-        "conditions": [
-            {
-                "field_id": "fld_confidence",
-                "operator": "isLess",
-                "value": '["0.6"]',
-                "field_type": 2,
-            }
-        ],
-    }
+    assert "视频内容" not in view_names
+    assert "低置信度" not in view_names
+    assert "失败待重试" not in view_names
+    assert inbox_hidden_fields.isdisjoint(inbox.visible_fields)
+    assert preview_hidden_fields.isdisjoint(unread.visible_fields)
+    assert preview_hidden_fields.isdisjoint(category_preview.visible_fields)
+    assert READING_TIME_FIELD in unread.visible_fields
+    assert READING_TIME_FIELD in category_preview.visible_fields
+    assert "内容质量" in system_info.visible_fields
+    assert "状态说明" not in system_info.visible_fields
 
 
-# 处理中视图的两个状态必须拆成 OR 条件，避免飞书丢弃第二个选项。
+# 处理队列视图的三个状态必须拆成 OR 条件，避免飞书丢弃后续选项。
 def test_processing_view_filter_uses_or_conditions() -> None:
     """验证多选项单选筛选请求格式。"""
 
@@ -367,6 +378,7 @@ def test_processing_view_filter_uses_or_conditions() -> None:
                 "options": [
                     {"id": "opt_pending", "name": "待处理"},
                     {"id": "opt_processing", "name": "处理中"},
+                    {"id": "opt_failed", "name": "失败"},
                 ]
             },
         }
@@ -379,4 +391,5 @@ def test_processing_view_filter_uses_or_conditions() -> None:
     assert [condition["value"] for condition in filter_info["conditions"]] == [
         '["opt_pending"]',
         '["opt_processing"]',
+        '["opt_failed"]',
     ]

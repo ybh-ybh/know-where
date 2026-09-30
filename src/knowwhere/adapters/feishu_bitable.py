@@ -39,7 +39,7 @@ DEFAULT_CATEGORIES: Final[tuple[str, ...]] = (
 )
 
 # 当前由应用管理的多维表格 Schema 版本。
-SCHEMA_VERSION: Final[int] = 3
+SCHEMA_VERSION: Final[int] = 4
 
 # 飞书多维表格的数据表名称。
 TABLE_NAME: Final[str] = "内容库"
@@ -116,14 +116,13 @@ FIELD_DEFINITIONS: Final[tuple[FieldDefinition, ...]] = (
     FieldDefinition("飞书全文文档", 15),
     FieldDefinition("内容质量", 3, ("完整", "部分", "仅元数据")),
     FieldDefinition("处理状态", 3, ("待处理", "处理中", "已完成", "部分成功", "失败")),
-    FieldDefinition("状态说明", 1),
     FieldDefinition("失败阶段", 3, ("解析", "抓取", "下载", "转录", "AI", "归档")),
     FieldDefinition("处理次数", 2, formatter="0"),
     FieldDefinition("最近处理时间", 5, date_formatter="yyyy/MM/dd HH:mm"),
     FieldDefinition("模型信息", 1),
 )
 
-# 默认工作视图只展示日常整理需要的字段。
+# 处理队列视图展示排查任务所需的完整业务字段。
 DEFAULT_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     TITLE_FIELD,
     ORIGINAL_TITLE_FIELD,
@@ -142,8 +141,27 @@ DEFAULT_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     "关键观点",
     "内容质量",
     "处理状态",
-    "状态说明",
     "飞书全文文档",
+)
+
+# 收件箱视图只展示快速浏览和整理所需字段。
+INBOX_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
+    TITLE_FIELD,
+    "原始链接",
+    "平台",
+    "内容类型",
+    "作者",
+    READ_STATUS_FIELD,
+    "一级分类",
+    "一句话摘要",
+    "详细摘要",
+    "关键观点",
+)
+
+# 未读和按分类浏览视图额外保留用户填写的阅读时间。
+PREVIEW_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
+    *INBOX_VISIBLE_FIELDS,
+    READING_TIME_FIELD,
 )
 
 # 全文视图聚焦阅读原文和完整归档内容。
@@ -167,8 +185,8 @@ SYSTEM_VISIBLE_FIELDS: Final[tuple[str, ...]] = (
     "平台内容 ID",
     "分类置信度",
     "全文保存方式",
+    "内容质量",
     "处理状态",
-    "状态说明",
     "失败阶段",
     "处理次数",
     "最近处理时间",
@@ -195,26 +213,16 @@ class ViewDefinition:
     resolve_option_ids: bool = True
 
 
-# Schema v3 的默认视图集合。
+# Schema v4 的默认视图集合。
 VIEW_DEFINITIONS: Final[tuple[ViewDefinition, ...]] = (
-    ViewDefinition(DEFAULT_VIEW_NAME, DEFAULT_VISIBLE_FIELDS),
-    ViewDefinition("未读", DEFAULT_VISIBLE_FIELDS, READ_STATUS_FIELD, (DEFAULT_READ_STATUS,)),
-    ViewDefinition("按分类浏览", DEFAULT_VISIBLE_FIELDS),
-    ViewDefinition("视频内容", DEFAULT_VISIBLE_FIELDS, "内容类型", ("视频",)),
+    ViewDefinition(DEFAULT_VIEW_NAME, INBOX_VISIBLE_FIELDS),
+    ViewDefinition("未读", PREVIEW_VISIBLE_FIELDS, READ_STATUS_FIELD, (DEFAULT_READ_STATUS,)),
+    ViewDefinition("按分类浏览", PREVIEW_VISIBLE_FIELDS),
     ViewDefinition(
         "待处理与处理中",
         DEFAULT_VISIBLE_FIELDS,
         "处理状态",
-        ("待处理", "处理中"),
-    ),
-    ViewDefinition("失败待重试", DEFAULT_VISIBLE_FIELDS, "处理状态", ("失败",)),
-    ViewDefinition(
-        "低置信度",
-        DEFAULT_VISIBLE_FIELDS,
-        "分类置信度",
-        ("0.6",),
-        "isLess",
-        False,
+        ("待处理", "处理中", "失败"),
     ),
     ViewDefinition("全文", FULL_TEXT_VISIBLE_FIELDS),
     ViewDefinition("系统信息", SYSTEM_VISIBLE_FIELDS),
@@ -413,12 +421,8 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
         analysis: AnalysisResult,
         collected_at: datetime,
     ) -> dict[str, Any]:
-        """构造一条 Schema v3 归档记录。"""
+        """构造一条 Schema v4 归档记录。"""
 
-        # 提取与分析警告合并后保序去重。
-        warnings = tuple(dict.fromkeys((*content.warnings, *analysis.warnings)))
-        # 没有供应商警告时仍明确说明启发式降级。
-        status_notes = warnings or (("AI 结果使用启发式降级生成",) if analysis.degraded else ())
         # 非完整证据或启发式分析都属于可见的部分成功。
         processing_status = (
             "部分成功"
@@ -457,7 +461,6 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             "全文保存方式": full_text_storage,
             "内容质量": CONTENT_QUALITY_LABELS[analysis.content_quality.value],
             "处理状态": processing_status,
-            "状态说明": "\n".join(status_notes),
             "处理次数": 1,
             "最近处理时间": self._datetime_milliseconds(collected_at),
             "模型信息": self._model_info,
@@ -514,7 +517,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
             if not tables:
                 raise RuntimeError("飞书新建多维表格没有默认数据表")
             default_table_id = str(tables[0].get("table_id", ""))
-        # Schema v3 表结构由创建接口原子写入，不保留飞书自带的空白字段。
+        # Schema v4 表结构由创建接口原子写入，不保留飞书自带的空白字段。
         table_data = self._request_json(
             "POST",
             f"/open-apis/bitable/v1/apps/{app_token}/tables",
@@ -661,7 +664,7 @@ class FeishuBitableAdapter(CategoryCatalogPort, RecordArchivePort):
 
     # 幂等补齐系统视图，并管理字段可见性与公开 API 支持的筛选。
     def _ensure_views(self, binding: WorkspaceBinding) -> None:
-        """补齐并配置 Schema v3 视图。"""
+        """补齐并配置 Schema v4 视图。"""
 
         # 远端字段集合。
         fields = self._list_fields(binding)
