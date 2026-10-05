@@ -9,7 +9,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 # 默认本地环境文件；容器也可以只注入进程环境变量。
 DEFAULT_ENV_FILE = Path(".env")
@@ -242,6 +242,26 @@ class DouyinSettings(BaseModel):
 class XiaohongshuSettings(BaseModel):
     """小红书公开笔记处理限制。"""
 
+    # SecretStr 不会自动隐藏校验失败时的原始输入。
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    # 可选网页会话，仅用于小红书详情页面请求。
+    cookie: SecretStr | None = None
+
+    # 空白视为匿名模式，拒绝无法安全放入 HTTP 请求头的字符。
+    @field_validator("cookie")
+    @classmethod
+    def validate_cookie(cls, value: SecretStr | None) -> SecretStr | None:
+        """校验会话字符串且不在错误信息中回显凭据。"""
+
+        if value is None:
+            return None
+        # 保留 Cookie 内部内容，只清除两端普通空格。
+        cookie = value.get_secret_value().strip(" ")
+        if any(ord(character) < 32 or ord(character) > 126 for character in cookie):
+            raise ValueError("KW_XIAOHONGSHU_COOKIE 只能包含单行 ASCII 可见字符")
+        return SecretStr(cookie) if cookie else None
+
     # 页面和媒体请求超时。
     request_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
     # 单张图片最大字节数。
@@ -277,6 +297,9 @@ class BilibiliSettings(BaseModel):
 # 应用完整配置快照。
 class AppSettings(BaseModel):
     """知归运行配置。"""
+
+    # 嵌套 Cookie 校验失败时，顶层异常也不能回显原始配置输入。
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     # 飞书配置。
     feishu: FeishuSettings
@@ -434,6 +457,7 @@ class AppSettings(BaseModel):
                 "ffmpeg_path": values.get("KW_FFMPEG_PATH", "ffmpeg"),
             },
             "xiaohongshu": {
+                "cookie": _optional_value(values, "KW_XIAOHONGSHU_COOKIE"),
                 "request_timeout_seconds": values.get(
                     "KW_XIAOHONGSHU_REQUEST_TIMEOUT_SECONDS", "60"
                 ),

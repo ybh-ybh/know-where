@@ -154,6 +154,41 @@ docker compose run --rm app process "https://mp.weixin.qq.com/s/文章ID"
 
 所有配置及默认值都在 [`.env.example`](.env.example) 中。以下配置只在对应能力启用时需要修改。
 
+### 小红书网页会话
+
+默认匿名请求小红书页面。若机器人提示“访问被引导至登录页”，可以配置浏览器会话：
+
+1. 在自己的浏览器打开原始分享链接，确认笔记可以正常显示。
+2. 在开发者工具的 Network（网络）中刷新页面，选择发往
+   `www.xiaohongshu.com` 或 `xiaohongshu.com` 的页面请求，复制请求头中
+   `Cookie` 的值（不包含 `Cookie:` 前缀）。可以先尝试未登录浏览器的 Cookie；
+   如果浏览器本身要求登录，完成登录后重新获取。
+3. 在本地 `.env` 中填写单行配置，保留原有分号、等号和空格：
+
+```dotenv
+KW_XIAOHONGSHU_COOKIE='a1=你的实际值; web_session=你的实际值'
+```
+
+Cookie 只用于上述两个页面主机，不发往 `xhslink.cn`、`xhslink.com` 或媒体 CDN。
+不要把 Cookie 发给机器人或提交到仓库。程序会隐藏配置显示中的 Cookie，页面请求错误
+也不会回显完整 URL 或访问令牌。原始分享链接仍按现有归档流程保存；其中的
+`xsec_token`、`xsec_source` 会保留用于页面访问，去重用的规范链接不携带这些参数。
+
+配置在启动时读取。代码首次升级时先执行 `docker compose build`；之后仅更新 Cookie
+不需要重建镜像，但需要重新创建 Gateway 容器（仅 `restart` 不会重新加载 `.env`）：
+
+```powershell
+docker compose --profile gateway up -d --force-recreate gateway
+```
+
+本地运行则重新启动 Gateway 进程。更新后重新发送原分享链接作为一条新消息。
+登录跳转不能单独证明 Cookie 已过期；配置 Cookie 后仍失败时，先确认浏览器能打开
+同一链接，再检查会话和部署环境的访问条件。限流时稍后再试，验证或安全拦截需要先在
+浏览器确认。程序不会自动登录、执行浏览器验证或循环重试这些访问错误。
+
+HTTP 200 不代表提取成功：程序还会验证目标笔记 ID 和页面数据。验收应分别确认页面
+提取、媒体下载及后续视觉理解/转录和归档；匿名访问失败时，Cookie 方案仍需真实会话验证。
+
 ### 图文视觉理解
 
 归档小红书或抖音图文时，需要同时配置：

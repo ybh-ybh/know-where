@@ -124,6 +124,24 @@ def test_extract_xiaohongshu_detail_url_from_text_message() -> None:
     )
 
 
+# 复现真实分享文案的标题、表情和多参数形式，令牌使用虚构值。
+def test_extract_xiaohongshu_complete_share_text() -> None:
+    """分享文案不能吞掉查询参数或令牌末尾等号。"""
+
+    # 保留原始链接结构但替换访问令牌。
+    url = (
+        "https://www.xiaohongshu.com/discovery/item/6a8c08720000000028031d9b"
+        "?source=webshare&xhsshare=pc_web&xsec_token=test-token="
+        "&xsec_source=pc_share"
+    )
+    # 用户复制的整段分享内容。
+    share = (
+        "11 【每周五下午消失的同事，成了唯一没被裁的人 - Anya 在外企 | "
+        "小红书 - 你的生活兴趣社区】 😆 aqe98RatDEHc2qg 😆 " + url
+    )
+    assert extract_supported_url(json.dumps({"text": share}, ensure_ascii=False)) == url
+
+
 # B站标准视频地址及分P参数应完整传给解析器。
 def test_extract_bilibili_video_url_from_text_message() -> None:
     """验证B站标准视频链接。"""

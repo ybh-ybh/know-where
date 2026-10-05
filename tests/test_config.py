@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from knowwhere.config import AppSettings, TencentCloudSettings
+from knowwhere.config import AppSettings, TencentCloudSettings, XiaohongshuSettings
 
 # 配置加载器识别的变量名，测试时先清除宿主机覆盖。
 CONFIG_KEYS = (
@@ -52,6 +52,7 @@ CONFIG_KEYS = (
     "KW_DOUYIN_MAX_VIDEO_BYTES",
     "KW_DOUYIN_MAX_IMAGES",
     "KW_XIAOHONGSHU_REQUEST_TIMEOUT_SECONDS",
+    "KW_XIAOHONGSHU_COOKIE",
     "KW_XIAOHONGSHU_MAX_IMAGE_BYTES",
     "KW_XIAOHONGSHU_MAX_VIDEO_BYTES",
     "KW_XIAOHONGSHU_MAX_IMAGES",
@@ -244,6 +245,7 @@ def test_env_file_loads_xiaohongshu_limits(
                 "KW_LLM_BASE_URL=https://llm.example/v1",
                 "KW_LLM_MODEL=text-model",
                 "KW_XIAOHONGSHU_REQUEST_TIMEOUT_SECONDS=95",
+                "KW_XIAOHONGSHU_COOKIE=a1=test-session; web_session=test-secret",
                 "KW_XIAOHONGSHU_MAX_IMAGE_BYTES=2345678",
                 "KW_XIAOHONGSHU_MAX_VIDEO_BYTES=3456789",
                 "KW_XIAOHONGSHU_MAX_IMAGES=20",
@@ -262,6 +264,42 @@ def test_env_file_loads_xiaohongshu_limits(
     assert settings.xiaohongshu.max_video_bytes == 3_456_789
     assert settings.xiaohongshu.max_images == 20
     assert settings.xiaohongshu.ffmpeg_path == "C:/tools/ffmpeg.exe"
+    assert settings.xiaohongshu.cookie is not None
+    assert settings.xiaohongshu.cookie.get_secret_value() == (
+        "a1=test-session; web_session=test-secret"
+    )
+    assert "test-secret" not in repr(settings.xiaohongshu)
+    assert "test-secret" not in settings.xiaohongshu.model_dump_json()
+
+    monkeypatch.setenv("KW_XIAOHONGSHU_COOKIE", "a1=environment-session")
+    assert AppSettings.load(env_file).xiaohongshu.cookie.get_secret_value() == (
+        "a1=environment-session"
+    )
+    monkeypatch.setenv("KW_XIAOHONGSHU_COOKIE", "")
+    assert AppSettings.load(env_file).xiaohongshu.cookie is None
+    monkeypatch.setenv("KW_XIAOHONGSHU_COOKIE", "a1=private-cookie\nInjected: yes")
+    with pytest.raises(ValidationError, match="单行 ASCII") as caught:
+        AppSettings.load(env_file)
+    assert "private-cookie" not in str(caught.value)
+
+
+# 未配置会话或只包含空格时必须保持匿名模式。
+@pytest.mark.parametrize("cookie", [None, "", "   "])
+def test_xiaohongshu_empty_cookie_is_anonymous(cookie: str | None) -> None:
+    """验证 Cookie 的默认和空白行为。"""
+
+    assert XiaohongshuSettings.model_validate({"cookie": cookie}).cookie is None
+    assert XiaohongshuSettings().cookie is None
+
+
+# 换行和非 ASCII 输入不得进入请求头，也不得通过校验异常暴露凭据。
+@pytest.mark.parametrize("suffix", ["\r\nInjected: yes", "\t", "中文"])
+def test_xiaohongshu_invalid_cookie_is_redacted(suffix: str) -> None:
+    """验证无效会话的安全提示。"""
+
+    with pytest.raises(ValidationError, match="单行 ASCII") as caught:
+        XiaohongshuSettings.model_validate({"cookie": "a1=private-cookie" + suffix})
+    assert "private-cookie" not in str(caught.value)
 
 
 # 无效 LLM 地址必须在启动配置阶段失败，而不是等到首次付费请求。

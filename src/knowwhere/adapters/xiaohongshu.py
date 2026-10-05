@@ -34,6 +34,8 @@ XIAOHONGSHU_USER_AGENT = (
 XIAOHONGSHU_PAGE_HOSTS = frozenset(
     {"xiaohongshu.com", "www.xiaohongshu.com", "xhslink.cn", "xhslink.com"}
 )
+# 仅向这两个详情主机发送配置的 Cookie，不向短链或 CDN 发送。
+XIAOHONGSHU_COOKIE_HOSTS = frozenset({"xiaohongshu.com", "www.xiaohongshu.com"})
 # 页面状态里的媒体只能来自小红书自有 CDN 域。
 XIAOHONGSHU_MEDIA_DOMAIN_SUFFIXES = ("xhscdn.com", "xiaohongshu.com")
 # 分享短链最多允许的安全跳转次数。
@@ -78,7 +80,7 @@ class XiaohongshuWork:
 
 # 小红书 Web 解析器负责短链还原、页面状态读取和字段兼容。
 class XiaohongshuWebResolver:
-    """解析无需登录即可访问的小红书公开笔记。"""
+    """使用匿名或用户配置的网页会话解析小红书笔记。"""
 
     # 保存请求配置和可替换 HTTP 客户端。
     def __init__(
@@ -131,23 +133,92 @@ class XiaohongshuWebResolver:
 
         # 当前待请求地址。
         current_url = url
+        # 首次到达详情地址时锁定目标身份，后续跳转不得切换笔记。
+        expected_note_id: str | None = None
         for _redirect_index in range(XIAOHONGSHU_MAX_REDIRECTS + 1):
+            self._validate_page_url(current_url)
+            self._check_access_path(current_url)
+            if urlsplit(current_url).hostname in XIAOHONGSHU_COOKIE_HOSTS:
+                try:
+                    # 当前详情地址中的笔记身份。
+                    current_note_id = self._extract_note_id(current_url)
+                except ValueError:
+                    if _redirect_index:
+                        raise ValueError("小红书链接跳转到了非笔记页面") from None
+                    raise
+                if expected_note_id is not None and current_note_id != expected_note_id:
+                    raise ValueError("小红书链接跳转到了不同的笔记")
+                expected_note_id = current_note_id
             # 当前页面响应。
-            response = self._client.get(current_url)
+            response = self._request_page(current_url)
             if response.is_redirect:
                 # 下一跳地址可能是相对路径。
                 location = response.headers.get("location")
                 if not location:
                     raise ValueError("小红书短链跳转缺少 Location")
                 # 解析后的下一跳绝对地址。
-                next_url = urljoin(current_url, location)
-                self._validate_page_url(next_url)
+                try:
+                    next_url = urljoin(current_url, location)
+                    self._validate_page_url(next_url)
+                except ValueError:
+                    raise ValueError("小红书跳转地址必须使用受支持的官方 HTTPS 主机") from None
                 current_url = next_url
                 continue
-            response.raise_for_status()
+            self._check_response_status(response.status_code)
             self._validate_detail_path(current_url)
             return current_url, response.text
         raise ValueError("小红书短链跳转次数过多")
+
+    # 每一跳重建 Cookie 请求头，禁用客户端隐式重定向和 Cookie 继承。
+    def _request_page(self, url: str) -> httpx.Response:
+        """请求页面并把网络错误转换成不含 URL 或凭据的提示。"""
+
+        try:
+            # build_request 可能合并客户端默认头或 Cookie jar，发送前统一移除。
+            request = self._client.build_request("GET", url)
+            request.headers.pop("Cookie", None)
+            if urlsplit(url).hostname in XIAOHONGSHU_COOKIE_HOSTS and self._settings.cookie:
+                request.headers["Cookie"] = self._settings.cookie.get_secret_value()
+            return self._client.send(request, follow_redirects=False)
+        except httpx.TimeoutException:
+            raise ValueError("小红书页面请求超时，请稍后重试") from None
+        except httpx.RemoteProtocolError:
+            raise ValueError("小红书页面响应或跳转地址格式无效") from None
+        except httpx.RequestError:
+            raise ValueError("小红书页面网络请求失败，请检查网络后重试") from None
+
+    # 登录和安全拦截地址在发起下一跳请求前识别，避免误报笔记 ID 缺失。
+    def _check_access_path(self, url: str) -> None:
+        """只依据明确路径分类，不把所有缺失数据都判定为 Cookie 过期。"""
+
+        # 去除末尾斜杠后的平台路径。
+        path = urlsplit(url).path.rstrip("/")
+        if path == "/login" or path.startswith("/login/"):
+            # 根据是否提供会话给出操作建议，不能据此断言会话已经失效。
+            action = (
+                "请检查或更新 KW_XIAOHONGSHU_COOKIE，并确认浏览器能打开原链接"
+                if self._settings.cookie
+                else "可配置 KW_XIAOHONGSHU_COOKIE 后重试，并确认浏览器能打开原链接"
+            )
+            raise ValueError(f"小红书访问被引导至登录页；{action}")
+        if path.startswith("/404/sec_"):
+            raise ValueError("小红书访问被安全页面拦截，请在浏览器确认原链接是否可访问")
+        if path == "/404" or path.startswith("/404/"):
+            raise ValueError("小红书笔记页面不可访问，请确认原分享链接有效")
+
+    # 不透传 HTTPX 的带 URL 异常，避免访问令牌进入数据库或飞书回执。
+    @staticmethod
+    def _check_response_status(status: int) -> None:
+        """将平台状态码转换为稳定的安全错误信息。"""
+
+        if status == 429:
+            raise ValueError("小红书请求受到限流，请稍后重试")
+        if status in {401, 403, 461, 471}:
+            raise ValueError("小红书访问受限或需要验证，请在浏览器确认后重试")
+        if status == 404:
+            raise ValueError("小红书笔记页面不存在或不可访问，请确认原分享链接有效")
+        if not 200 <= status < 300:
+            raise ValueError(f"小红书页面请求失败（HTTP {status}），请稍后重试")
 
     # 从内嵌脚本读取 JSON，兼容服务端状态里的 JavaScript undefined。
     @staticmethod
@@ -336,12 +407,17 @@ class XiaohongshuWebResolver:
         """校验页面 URL 主机、协议和用户信息。"""
 
         # 解析后的页面地址。
-        parts = urlsplit(url)
+        try:
+            parts = urlsplit(url)
+            # 提前读取端口，使 URL 解析异常也不会回显原始输入。
+            port = parts.port
+        except ValueError:
+            raise ValueError("小红书页面地址格式无效") from None
         # 小写页面主机名。
         hostname = (parts.hostname or "").lower()
         if parts.scheme != "https" or hostname not in XIAOHONGSHU_PAGE_HOSTS:
             raise ValueError("小红书链接必须使用受支持的官方 HTTPS 主机")
-        if parts.username or parts.password or parts.port is not None:
+        if parts.username or parts.password or port is not None:
             raise ValueError("小红书链接不能包含用户信息或自定义端口")
 
     # 最终页面必须是单篇笔记路径。
@@ -349,6 +425,8 @@ class XiaohongshuWebResolver:
     def _validate_detail_path(cls, url: str) -> None:
         """拒绝跳转到首页、登录页或其他非笔记页面。"""
 
+        if urlsplit(url).hostname not in XIAOHONGSHU_COOKIE_HOSTS:
+            raise ValueError("小红书短链未返回笔记详情页面")
         cls._extract_note_id(url)
 
     # 从 explore 或 discovery/item 路径提取笔记 ID。
@@ -360,9 +438,9 @@ class XiaohongshuWebResolver:
         segments = tuple(segment for segment in urlsplit(url).path.split("/") if segment)
         # 支持的详情路径前缀。
         candidate: str | None = None
-        if len(segments) >= 2 and segments[-2] == "explore":
+        if len(segments) == 2 and segments[-2] == "explore":
             candidate = segments[-1]
-        elif len(segments) >= 3 and segments[-3:-1] == ("discovery", "item"):
+        elif len(segments) == 3 and segments[-3:-1] == ("discovery", "item"):
             candidate = segments[-1]
         if candidate and XIAOHONGSHU_NOTE_ID_PATTERN.fullmatch(candidate):
             return candidate.lower()
