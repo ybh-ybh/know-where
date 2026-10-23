@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>知归 KnowWhere · 个人 AI 知识归档工具</title>
   <meta name="description" content="知归（KnowWhere）是一个面向个人使用的 AI 知识归档工具。把内容链接发送给飞书机器人，自动完成内容提取、AI 分类与总结，沉淀到飞书多维表格。">
+  <link rel="stylesheet" href="assets/getting-started.css">
+  <script src="assets/getting-started.js" defer></script>
   <style>
     :root {
       --bg: #F3F1EC;
@@ -52,15 +54,17 @@
     .nav-links { display: flex; align-items: center; gap: 26px; font-size: 14px; color: var(--muted); }
     .nav-links a:hover { color: var(--ink); }
     .nav-cta {
+      display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
       padding: 8px 16px; border-radius: 8px; background: var(--ink); color: #F3F1EC;
       font-weight: 600; transition: background .15s;
     }
+    .nav-cta svg { width: 18px; height: 18px; flex-shrink: 0; fill: currentColor; }
     .nav-cta:hover { background: var(--ink-soft); }
 
     .hero { padding: 88px 0 24px; }
     .hero-grid {
       display: grid;
-      grid-template-columns: 1.05fr 0.95fr;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
       gap: 56px;
       align-items: center;
     }
@@ -82,13 +86,37 @@
     .btn-primary:hover { background: var(--ink-soft); }
     .btn-ghost { border: 1px solid var(--line); background: transparent; color: var(--ink); }
     .btn-ghost:hover { border-color: var(--faint); }
-    .hero-visual {
-      background: var(--bg-deep);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      overflow: hidden;
+    .hero-visual figcaption { font-size: 18px; font-weight: 700; }
+    /* 按实际处理顺序排列节点，用折返连线适配首屏右栏。 */
+    .hero-flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr);
+      grid-template-areas: "input next extract" ". . down" "archive back ai";
+      grid-template-rows: auto 36px auto;
+      list-style: none;
+      margin-top: 24px;
     }
-    .hero-visual img { display: block; width: 100%; height: auto; }
+    .flow-node { position: relative; padding: 16px 12px; border: 1px solid var(--line); border-radius: 10px; background: #FFFDF8; }
+    .flow-node strong { display: block; font-size: 15px; }
+    .flow-node p { margin-top: 6px; font-size: 12px; color: var(--muted); }
+    .flow-node .flow-index { display: block; margin-bottom: 8px; font-size: 11px; color: var(--faint); }
+    .flow-input { grid-area: input; }
+    .flow-extract { grid-area: extract; }
+    .flow-ai { grid-area: ai; background: var(--accent); border-color: var(--accent); color: #fff; }
+    .flow-ai p, .flow-ai .flow-index { color: #fff; }
+    .flow-archive { grid-area: archive; }
+    /* 箭头只作视觉连接，辅助阅读仍遵循列表中的处理顺序。 */
+    .flow-input::after, .flow-extract::after, .flow-ai::after {
+      position: absolute;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 22px;
+    }
+    .flow-input::after { content: "\2192" / ""; width: 32px; height: 100%; top: 0; right: -33px; }
+    .flow-extract::after { content: "\2193" / ""; height: 36px; width: 100%; left: 0; bottom: -37px; }
+    .flow-ai::after { content: "\2190" / ""; width: 32px; height: 100%; top: 0; left: -33px; }
+    .flow-storage { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 
     section { padding: 72px 0; }
     .section-label {
@@ -114,41 +142,12 @@
     .card h3 { font-size: 18px; font-weight: 700; }
     .card p { margin-top: 6px; font-size: 14px; color: var(--muted); }
 
-    .pipeline {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-top: 36px;
-    }
-    .step { position: relative; border-radius: var(--radius); padding: 22px; border: 1px solid var(--line); background: #FFFDF8; }
-    .step.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .step .idx { font-size: 12px; letter-spacing: 0.05em; opacity: .7; margin-bottom: 10px; }
-    .step h3 { font-size: 17px; font-weight: 700; }
-    .step.hot h3 { color: #fff; }
-    .step p { margin-top: 6px; font-size: 13.5px; color: var(--muted); }
-    .step.hot p { color: #fff; opacity: .92; }
-
+    #features .section-title { text-wrap: balance; }
     .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 36px; }
     .feature { border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; background: #FFFDF8; }
     .feature h3 { font-size: 18px; font-weight: 700; }
     .feature p { margin-top: 8px; font-size: 14.5px; color: var(--muted); }
-
-    .quickstart {
-      background: var(--ink);
-      color: #F3F1EC;
-      border-radius: 20px;
-      padding: 56px;
-    }
-    .quickstart h2 { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
-    .quickstart p { margin-top: 14px; color: #CFCBC2; font-size: 16px; max-width: 560px; }
-    .quickstart .btn { margin-top: 28px; background: #F3F1EC; color: var(--ink); }
-    .quickstart .btn:hover { background: var(--bg-deep); }
-    code {
-      font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
-      font-size: 13px;
-      background: rgba(255,255,255,0.12);
-      padding: 2px 6px; border-radius: 5px;
-    }
+    .features-note { margin-top: 24px; font-size: 14px; line-height: 1.8; color: var(--muted); }
 
     footer { border-top: 1px solid var(--line); margin-top: 24px; }
     .footer { display: flex; align-items: center; justify-content: space-between; padding: 28px 0; font-size: 14px; color: var(--muted); flex-wrap: wrap; gap: 12px; }
@@ -158,13 +157,14 @@
     @media (max-width: 860px) {
       .hero-grid { grid-template-columns: 1fr; }
       .hero-title { font-size: 52px; }
-      .platforms, .pipeline, .features { grid-template-columns: 1fr 1fr; }
+      .platforms, .features { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 560px) {
-      .platforms, .pipeline, .features { grid-template-columns: 1fr; }
+      .platforms, .features { grid-template-columns: 1fr; }
       .hero-title { font-size: 42px; }
       .hero-sub { font-size: 26px; }
       .nav-links { display: none; }
+      .flow-node { padding: 14px 10px; }
     }
   </style>
 </head>
@@ -184,11 +184,15 @@
       </div>
       <nav class="nav-links">
         <a href="#platforms">支持平台</a>
-        <a href="#pipeline">工作流程</a>
-        <a href="#features">核心能力</a>
+        <a href="#features">产品亮点</a>
         <a href="#quickstart">快速开始</a>
       </nav>
-      <a class="nav-cta" href="https://github.com/ybh-ybh/know-where" target="_blank" rel="noopener">GitHub</a>
+      <a class="nav-cta" href="https://github.com/ybh-ybh" target="_blank" rel="noopener" aria-label="作者的 GitHub 个人主页">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 .297C5.37.297 0 5.67 0 12.297c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.084 1.838 1.237 1.838 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.762-1.605-2.665-.3-5.467-1.334-5.467-5.93 0-1.31.467-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.4 3-.405 1.02.005 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+        </svg>
+        <span>GitHub</span>
+      </a>
     </div>
   </header>
 
@@ -205,17 +209,39 @@
           </p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="#quickstart">开始使用</a>
-            <a class="btn btn-ghost" href="https://github.com/ybh-ybh/know-where" target="_blank" rel="noopener">查看源码</a>
+            <a class="btn btn-ghost" href="https://github.com/ybh-ybh/know-where" target="_blank" rel="noopener">查看 GitHub 仓库</a>
           </div>
         </div>
-        <div class="hero-visual">
-          <img src="assets/banner.png" alt="知归 KnowWhere 数据流示意">
-        </div>
+        <figure class="hero-visual">
+          <figcaption>一条链接，一条知识记录</figcaption>
+          <ol class="hero-flow" aria-label="内容归档流程">
+            <li class="flow-node flow-input">
+              <span class="flow-index">01</span>
+              <strong>发送链接</strong>
+              <p>飞书私聊 / CLI</p>
+            </li>
+            <li class="flow-node flow-extract">
+              <span class="flow-index">02</span>
+              <strong>内容提取</strong>
+              <p>文章 / 图文 / 语音</p>
+            </li>
+            <li class="flow-node flow-ai">
+              <span class="flow-index">03</span>
+              <strong>AI 分类总结</strong>
+              <p>分类 / 标签 / 摘要</p>
+            </li>
+            <li class="flow-node flow-archive">
+              <span class="flow-index">04</span>
+              <strong>归档到飞书</strong>
+              <p>多维表格知识库</p>
+            </li>
+          </ol>
+          <p class="flow-storage">PostgreSQL 保存任务快照</p>
+        </figure>
       </div>
     </section>
 
     <section id="platforms">
-      <div class="section-label">Sources</div>
       <h2 class="section-title">支持的内容来源</h2>
       <p class="section-desc">在飞书私聊发送公开内容链接，知归自动识别平台并提取正文、图文或语音。</p>
       <div class="platforms">
@@ -228,60 +254,105 @@
       </div>
     </section>
 
-    <section id="pipeline">
-      <div class="section-label">Workflow</div>
-      <h2 class="section-title">一条链接，一条知识记录</h2>
-      <p class="section-desc">从发送链接到归档，完整的自动处理链路。</p>
-      <div class="pipeline">
-        <div class="step"><div class="idx">01</div><h3>发送链接</h3><p>飞书私聊或 CLI 发送内容链接</p></div>
-        <div class="step"><div class="idx">02</div><h3>平台提取</h3><p>识别平台，提取正文、README、图文或语音</p></div>
-        <div class="step hot"><div class="idx">03</div><h3>AI 分类</h3><p>生成标题、分类、标签、摘要与关键观点</p></div>
-        <div class="step"><div class="idx">04</div><h3>写入飞书</h3><p>归档到多维表格，PostgreSQL 保存快照</p></div>
-      </div>
-    </section>
-
     <section id="features">
-      <div class="section-label">Highlights</div>
-      <h2 class="section-title">核心能力</h2>
-      <p class="section-desc">为个人知识沉淀设计，稳定、可替换、隐私友好。</p>
+      <h2 class="section-title">让收藏，更容易回顾和使用</h2>
+      <p class="section-desc">从发送链接到整理归档，把重复工作交给知归。</p>
       <div class="features">
         <div class="feature">
-          <h3>飞书长连接</h3>
-          <p>通过飞书官方 SDK 建立长连接，无需公网域名或 Webhook 回调地址。</p>
+          <h3>随手发个链接，剩下自动完成</h3>
+          <p>在飞书私聊中发送链接，自动提取内容、生成摘要并完成归档，省去来回复制和手动整理。</p>
         </div>
         <div class="feature">
-          <h3>幂等归档</h3>
-          <p>使用规范化链接和平台内容 ID 去重，避免重复归档。</p>
+          <h3>散落各个平台，统一收进知识库</h3>
+          <p>公众号、掘金、GitHub、小红书、抖音、B站的公开内容，集中保存到飞书多维表格，方便后续查找。</p>
         </div>
         <div class="feature">
-          <h3>AI 输出校验</h3>
-          <p>AI 结果经 JSON Schema 校验；格式出错自动修复一次，失败则明确降级。</p>
+          <h3>长文和视频，先看懂重点</h3>
+          <p>自动整理摘要与关键观点，支持图文理解和视频语音转录，回顾内容时更快找到值得细读的部分。</p>
         </div>
         <div class="feature">
-          <h3>视觉理解与转录</h3>
-          <p>支持图文视觉理解与视频语音转录，本地 faster-whisper 可无云端 ASR 凭据。</p>
-        </div>
-        <div class="feature">
-          <h3>自定义分类</h3>
-          <p>直接读取飞书「一级分类」字段选项，随时扩展自己的分类体系。</p>
-        </div>
-        <div class="feature">
-          <h3>阅读状态管理</h3>
-          <p>新内容默认「未读」，支持收件箱、未读、按分类浏览等视图。</p>
+          <h3>按自己的习惯，整理和消化</h3>
+          <p>在飞书中自定义分类、标记阅读状态、补充阅读笔记，让每次收藏都有后续。</p>
         </div>
       </div>
     </section>
 
-    <section id="quickstart">
-      <div class="quickstart">
-        <h2>开始使用</h2>
-        <p>推荐使用 Docker Compose 部署。准备一个 PostgreSQL 数据库、一个飞书企业自建应用，以及一个 OpenAI 兼容的文本模型即可。</p>
-        <a class="btn" href="https://github.com/ybh-ybh/know-where#最小启动方式" target="_blank" rel="noopener">查看完整部署文档</a>
-        <p style="margin-top:28px;font-size:14px;color:#8f8b83;">
-          配置示例：<code>KW_DATABASE_URL</code> · <code>KW_FEISHU_APP_ID</code> · <code>KW_LLM_API_KEY</code> · <code>KW_LLM_MODEL</code>
-        </p>
+    <section id="quickstart" class="guide">
+      <h2 class="section-title">开始使用，把第一条内容收进知识库</h2>
+      <p class="section-desc">从拉取代码到飞书归档，跟着下面 8 步完成 Docker 部署。先跑通文章或 GitHub 链接，再按需开启图文和视频能力。</p>
+      <div class="guide-controls">
+        <div class="guide-field"><span id="guide-os-label">你的系统</span><select id="guide-os" aria-labelledby="guide-os-label"><option value="windows">Windows · PowerShell</option><option value="macos">macOS · 终端</option><option value="linux">Linux · 终端</option></select></div>
+        <div class="guide-field guide-field-db"><span id="guide-db-label">数据库方式</span><select id="guide-db" aria-labelledby="guide-db-label"><option value="new">新建 PostgreSQL（推荐新用户）</option><option value="existing">使用已有 PostgreSQL</option></select></div>
       </div>
-    </section>
+      <noscript><p class="guide-note">当前未启用 JavaScript。下方会同时展示各系统和数据库方式的命令，请只执行与你的情况对应的一组。</p></noscript>
+      <p class="guide-selection" id="guide-selection" aria-live="polite"></p>
+      <div class="guide-layout"><details class="guide-toc" open><summary>部署目录</summary><nav aria-label="部署教程步骤">
+<a href="#setup-code">01 准备环境与代码</a><a href="#setup-feishu">02 创建飞书机器人</a><a href="#setup-config">03 填写模型与配置</a><a href="#setup-database">04 准备数据库</a><a href="#setup-start">05 构建并启动</a><a href="#setup-publish">06 订阅事件与发布</a><a href="#setup-first">07 完成第一条归档</a><a href="#setup-maintain">08 日常运行与更新</a><a href="#setup-extra">09 开通更多能力</a><a href="#setup-help">10 遇到问题</a>
+</nav></details><div class="guide-content">
+<article class="guide-step" id="setup-code"><div class="guide-step-number">01</div><h3>准备环境，拉取项目</h3><p>准备 Git 和已运行的 Docker。Docker 镜像内已包含 Python、uv 和 FFmpeg，本机不需要单独安装它们。</p>
+<div data-os="windows"><h4>Windows · PowerShell</h4><p>安装 <a href="https://git-scm.com/downloads/win" target="_blank" rel="noopener">Git for Windows</a> 和 <a href="https://docs.docker.com/desktop/setup/install/windows-install/" target="_blank" rel="noopener">Docker Desktop</a>，按安装提示启用 WSL 2。启动 Docker Desktop，使用 Linux 容器，然后重新打开 PowerShell。</p></div>
+<div data-os="macos"><h4>macOS · 终端</h4><p>安装 <a href="https://git-scm.com/downloads/mac" target="_blank" rel="noopener">Git</a> 和 <a href="https://docs.docker.com/desktop/setup/install/mac-install/" target="_blank" rel="noopener">Docker Desktop</a>，按芯片类型选择安装包。启动 Docker Desktop，再打开终端。</p></div>
+<div data-os="linux"><h4>Linux · 终端</h4><p>通过发行版包管理器安装 Git，再按 <a href="https://docs.docker.com/engine/install/" target="_blank" rel="noopener">Docker Engine 安装指南</a>及 <a href="https://docs.docker.com/compose/install/linux/" target="_blank" rel="noopener">Compose 插件指南</a>完成安装并启动 Docker 服务。确认当前账号能运行 Docker 后再继续。</p></div><div class="guide-code" ><div class="guide-code-head"><span>检查工具</span><button type="button" class="guide-copy" aria-label="复制检查工具">复制</button></div><pre tabindex="0"><code>git --version
+docker compose version
+docker info</code></pre></div><p>前三条命令应显示版本信息和 Docker 服务端信息；若提示无法连接 Docker，请先启动 Docker 服务。</p><div class="guide-code" ><div class="guide-code-head"><span>拉取项目</span><button type="button" class="guide-copy" aria-label="复制拉取项目">复制</button></div><pre tabindex="0"><code>git clone https://github.com/ybh-ybh/know-where.git
+cd know-where</code></pre></div><div class="guide-code" data-os="windows"><div class="guide-code-head"><span>PowerShell · 复制配置</span><button type="button" class="guide-copy" aria-label="复制PowerShell · 复制配置">复制</button></div><pre tabindex="0"><code>Copy-Item .env.example .env</code></pre></div><div class="guide-code" data-os="unix"><div class="guide-code-head"><span>macOS / Linux · 复制配置</span><button type="button" class="guide-copy" aria-label="复制macOS / Linux · 复制配置">复制</button></div><pre tabindex="0"><code>cp .env.example .env</code></pre></div></article>
+<article class="guide-step" id="setup-feishu"><div class="guide-step-number">02</div><h3>创建你的飞书机器人</h3><ol><li>登录 <a href="https://open.feishu.cn/app" target="_blank" rel="noopener">飞书开放平台开发者后台</a>，创建“企业自建应用”，名称可填写“知归”。</li><li>在“添加应用能力”中启用“机器人”。</li><li>打开“凭证与基础信息”，复制 App ID（通常以 cli_ 开头）和 App Secret，稍后填入本机 .env。</li><li>在“权限管理”中搜索并添加下表权限。控制台若细分文档权限，选择创建/编辑新版文档和添加云文档协作者。</li><li>在版本发布时，将应用可用范围设为你本人。事件订阅和最终发布在第 6 步完成。</li></ol><div class="guide-table"><table><thead><tr><th>权限标识</th><th>用途</th></tr></thead><tbody><tr><td><code>im:message.p2p_msg:readonly</code></td><td>读取发给机器人的私聊消息</td></tr><tr><td><code>im:message:send_as_bot</code></td><td>以机器人身份回复消息</td></tr><tr><td><code>bitable:app</code></td><td>创建、编辑和管理多维表格</td></tr><tr><td><code>drive:drive.metadata:readonly</code></td><td>读取归档空间所有者</td></tr><tr><td><code>docs:doc</code></td><td>管理正文文档</td></tr><tr><td><code>docs:permission.member:create</code></td><td>添加云文档协作者；控制台拆分文档权限时申请</td></tr></tbody></table></div><p class="guide-note">知归使用长连接，无需公网域名、Webhook 回调地址、Verification Token 或 Encrypt Key。个人使用范围由飞书应用可用范围控制，请勿设为全员。</p><p class="guide-success"><strong>完成标志</strong> 机器人能力已开启，取得应用凭据并添加所需权限。</p></article>
+<article class="guide-step" id="setup-config"><div class="guide-step-number">03</div><h3>准备模型，填写 .env</h3><p>在你选择的模型服务控制台创建 API Key，查找其 OpenAI 兼容 Chat Completions 接口根地址和模型 ID。下面六项是主线必填配置，替换占位值后保存。</p><div class="guide-code" ><div class="guide-code-head"><span>dotenv · 六项必填</span><button type="button" class="guide-copy" aria-label="复制dotenv · 六项必填">复制</button></div><pre tabindex="0"><code># 数据库连接地址：按第 4 步选择的路径填写。
+KW_DATABASE_URL=postgresql+psycopg://knowwhere:替换为数据库密码@postgres:5432/knowwhere
+# 飞书自建应用的凭据。
+KW_FEISHU_APP_ID=cli_替换为你的AppID
+KW_FEISHU_APP_SECRET=替换为你的AppSecret
+# 文本模型：填写供应商的兼容接口根地址和实际模型ID。
+KW_LLM_API_KEY=替换为你的APIKey
+KW_LLM_BASE_URL=https://你的模型服务地址/v1
+KW_LLM_MODEL=替换为你的模型ID</code></pre></div><p>Base URL 使用供应商提供的根地址，不要追加 <code>/chat/completions</code>。<br>
+保留模板的 <code>KW_ASR_PROVIDER=faster_whisper</code> 和 <code>KW_TEMP_STORAGE_PROVIDER=local</code>。<br>
+视觉模型三项此时可继续注释。</p><p class="guide-note">只在本机编辑 .env。此页面不需要你填写密钥；不要把 .env 上传到 GitHub。数据库地址在下一步补全。</p><p class="guide-success"><strong>完成标志</strong> 已填写自己的飞书与文本模型配置，准备补全数据库连接。</p></article>
+<article class="guide-step" id="setup-database"><div class="guide-step-number">04</div><h3>准备 PostgreSQL</h3><div data-db="new"><h4>新建数据库 · 可选 Compose 配置</h4><p>仓库已经提供 compose.postgres.yml。它会单独启动 PostgreSQL 17 容器，数据保存在命名卷中，不开放主机端口。请自行生成至少 24 位随机字母数字密码，并在 .env 中填写下面两项；两处密码必须相同。</p><div class="guide-code" ><div class="guide-code-head"><span>dotenv · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制dotenv · 新建数据库">复制</button></div><pre tabindex="0"><code># 自行生成的数据库密码；只供可选 PostgreSQL 容器使用。
+KW_POSTGRES_PASSWORD=替换为你的随机字母数字密码
+# 用同一个密码替换此处，主机名保持 postgres。
+KW_DATABASE_URL=postgresql+psycopg://knowwhere:替换为你的随机字母数字密码@postgres:5432/knowwhere</code></pre></div><div class="guide-code" ><div class="guide-code-head"><span>启动数据库</span><button type="button" class="guide-copy" aria-label="复制启动数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml up -d postgres
+docker compose -f compose.yml -f compose.postgres.yml ps postgres</code></pre></div><p>等待状态显示 healthy 后继续。数据库名和用户名均为 knowwhere。密码仅在空数据卷第一次初始化时生效，之后只修改 .env 不会改变数据库中已有账号密码。</p></div>
+<div data-db="existing"><h4>使用已有数据库</h4><p>先在 PostgreSQL 管理工具中创建专用数据库和账号，确保账号能连接并创建、修改表。将实际连接信息填入 .env：</p><div class="guide-code" ><div class="guide-code-head"><span>dotenv · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制dotenv · 已有数据库">复制</button></div><pre tabindex="0"><code>KW_DATABASE_URL=postgresql+psycopg://用户名:URL编码后的密码@容器可访问的数据库主机:5432/knowwhere</code></pre></div><p>不要启用 compose.postgres.yml，也不需要 KW_POSTGRES_PASSWORD。若密码含 @、:、/、% 等字符，先对密码部分进行 URL 编码，端口使用数据库实际端口。</p><p>容器内的 localhost / 127.0.0.1 是容器自身。远程数据库使用容器可达的域名或 IP；Windows/macOS Docker Desktop 上的宿主机数据库可使用 host.docker.internal，并确认 PostgreSQL 监听地址和访问规则允许 Docker 连接。Linux 主机上的数据库需提供容器可达的主机地址，不直接套用 localhost。</p></div><p class="guide-success"><strong>完成标志</strong> 新建数据库为 healthy；或已有数据库已建好，.env 中填写了容器可达的连接地址。</p></article>
+<article class="guide-step" id="setup-start"><div class="guide-step-number">05</div><h3>构建镜像，启动知归</h3><p>首次构建会下载系统和 Python 依赖，请等待命令完成。接着迁移数据库并检查连接：</p><div class="guide-code" data-db="new"><div class="guide-code-head"><span>构建镜像 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制构建镜像 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml build app</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>构建镜像 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制构建镜像 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose build app</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>迁移与健康检查 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制迁移与健康检查 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml run --rm app migrate-and-health</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>迁移与健康检查 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制迁移与健康检查 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose run --rm app migrate-and-health</code></pre></div><p>成功输出 <code>OK: migrations + config + postgresql</code>。此时验证的是配置和数据库，不代表飞书权限或模型接口已验证。</p><div class="guide-code" data-db="new"><div class="guide-code-head"><span>后台启动机器人 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制后台启动机器人 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>后台启动机器人 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制后台启动机器人 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway up -d gateway</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>查看状态与日志 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制查看状态与日志 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway ps
+docker compose -f compose.yml -f compose.postgres.yml logs --tail 50 gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>查看状态与日志 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制查看状态与日志 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway ps
+docker compose logs --tail 50 gateway</code></pre></div><p>gateway 应保持运行。若不断重启，先到下方排错区域检查原因。不要仅凭“长连接已启动”这一行判断已成功连到飞书，下一步还要检查飞书控制台并发送消息验证。</p><p class="guide-success"><strong>完成标志</strong> 数据库检查通过，Gateway 容器持续运行，准备回飞书设置事件。</p></article>
+<article class="guide-step" id="setup-publish"><div class="guide-step-number">06</div><h3>订阅消息事件，发布应用</h3><ol><li>保持 Gateway 运行，回到飞书开发者后台的“事件与回调 → 事件配置”（部分界面称“事件订阅”）。</li><li>编辑订阅方式，选择“使用长连接接收事件”，保存并确认连接在线。若提示未建立长连接，检查第 5 步的日志和应用凭据后重试。</li><li>添加“接收消息”事件，标识为 <code>im.message.receive_v1</code>。</li><li>到“版本管理与发布”创建版本，确认机器人能力、所需权限和事件已包含，将应用可用范围设置为你本人。</li><li>提交发布。若企业要求审核，请等待管理员批准和安装后再继续。</li></ol><p>权限生效后，初始化飞书归档空间：</p><div class="guide-code" data-db="new"><div class="guide-code-head"><span>初始化飞书 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制初始化飞书 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml run --rm app init-feishu</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>初始化飞书 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制初始化飞书 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose run --rm app init-feishu</code></pre></div><p>命令会输出 <code>workspace_url=...</code> 和 <code>schema_version=...</code>。多维表格和字段由程序创建，无需自己填 app_token 或 table_id。此时资源可能仍由应用持有；下一步发送有效链接后，程序才会授予个人用户访问权限。</p><p class="guide-success"><strong>完成标志</strong> 应用已发布且权限生效，初始化命令返回工作区地址。</p></article>
+<article class="guide-step" id="setup-first"><div class="guide-step-number">07</div><h3>发送链接，完成第一条归档</h3><p>在飞书客户端搜索并打开你创建的“知归”机器人私聊，直接发送下面的公开仓库链接：</p><div class="guide-code" ><div class="guide-code-head"><span>发送给飞书机器人</span><button type="button" class="guide-copy" aria-label="复制发送给飞书机器人">复制</button></div><pre tabindex="0"><code>https://github.com/ybh-ybh/know-where</code></pre></div><ol><li>先收到“知归已收到，正在提取、总结并归档。”</li><li>等待模型处理完成，收到“归档完成：”及记录链接。</li><li>打开记录，检查标题、原始链接、分类、摘要和关键观点。也可查看多维表格的未读与分类视图。</li></ol><p>第一次请使用文字内容验证。只发送“绑定知归”不会触发归档；视频与图文可在下方扩展能力中继续配置。</p><p class="guide-success"><strong>完成标志</strong> 机器人返回归档完成，且你能打开记录、看到本次链接及整理结果。到这里主线部署完成。</p></article>
+<article class="guide-step" id="setup-maintain"><div class="guide-step-number">08</div><h3>日常运行与更新</h3><h4>查看日志、停止与恢复机器人</h4><div class="guide-code" data-db="new"><div class="guide-code-head"><span>实时日志 · Ctrl+C 仅退出查看 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制实时日志 · Ctrl+C 仅退出查看 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml logs -f gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>实时日志 · Ctrl+C 仅退出查看 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制实时日志 · Ctrl+C 仅退出查看 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose logs -f gateway</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>仅停止机器人 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制仅停止机器人 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml stop gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>仅停止机器人 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制仅停止机器人 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose stop gateway</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>恢复运行 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制恢复运行 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>恢复运行 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制恢复运行 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway up -d gateway</code></pre></div><h4>修改 .env 后重新创建容器</h4><p>只运行 restart 不会重新载入 env_file。修改配置后执行：</p><div class="guide-code" data-db="new"><div class="guide-code-head"><span>应用新配置 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制应用新配置 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d --force-recreate gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>应用新配置 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制应用新配置 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway up -d --force-recreate gateway</code></pre></div><h4>更新代码</h4><p>先暂停向机器人发送链接，等待当前归档完成，再停止 Gateway 接收新任务：</p><div class="guide-code" data-db="new"><div class="guide-code-head"><span>更新前停止机器人 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制更新前停止机器人命令">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml stop gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>更新前停止机器人 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制更新前停止机器人命令">复制</button></div><pre tabindex="0"><code>docker compose stop gateway</code></pre></div><p>然后备份数据库。新建数据库可执行以下命令，将容器内备份复制到当前目录；已有数据库请使用供应商备份或 pg_dump。完成备份后再拉取代码并更新。</p><div data-db="new"><div class="guide-code" ><div class="guide-code-head"><span>备份数据库 · 同名文件会被覆盖</span><button type="button" class="guide-copy" aria-label="复制备份数据库 · 同名文件会被覆盖">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml exec -T postgres pg_dump -U knowwhere -d knowwhere -Fc -f /tmp/knowwhere-backup.dump
+docker compose -f compose.yml -f compose.postgres.yml cp postgres:/tmp/knowwhere-backup.dump ./knowwhere-backup.dump</code></pre></div></div><div class="guide-code" ><div class="guide-code-head"><span>拉取更新</span><button type="button" class="guide-copy" aria-label="复制拉取更新">复制</button></div><pre tabindex="0"><code>git pull --ff-only</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>构建、迁移、更新 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制构建、迁移、更新 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml build app
+docker compose -f compose.yml -f compose.postgres.yml run --rm app migrate-and-health
+docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d --force-recreate gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>构建、迁移、更新 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制构建、迁移、更新 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose build app
+docker compose run --rm app migrate-and-health
+docker compose --profile gateway up -d --force-recreate gateway</code></pre></div><p>若 git pull 提示存在本地改动或分支分叉，先保存改动、处理提示，不强行覆盖。</p><h4>停止整套容器</h4><div class="guide-code" data-db="new"><div class="guide-code-head"><span>停止容器并保留数据卷 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制停止容器并保留数据卷 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway down</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>停止容器并保留数据卷 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制停止容器并保留数据卷 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway down</code></pre></div><p>新建数据库方式会同时停止 PostgreSQL；已有数据库不会受此命令停止。恢复时先按第 4 步启动数据库，再恢复 Gateway。不要添加 <code>-v</code>，否则会删除本项目管理的数据卷。</p><p class="guide-success"><strong>完成标志</strong> 能查看运行状态、应用配置更新，并知道如何备份和保留数据停止服务。</p></article>
+<article class="guide-step" id="setup-extra"><h3>按需开通更多能力</h3><p>下面均为可选项。先完成第一条文字归档，再根据自己收藏的内容类型启用。</p>
+<details class="guide-detail"><summary>图文识别 · 小红书 / 抖音</summary><div><p>选择支持图片输入的 OpenAI 兼容视觉模型，在 .env 中取消这三项注释并全部填写：</p><div class="guide-code" ><div class="guide-code-head"><span>dotenv · 视觉模型</span><button type="button" class="guide-copy" aria-label="复制dotenv · 视觉模型">复制</button></div><pre tabindex="0"><code># 图片理解服务的密钥、兼容接口根地址和模型ID。
+KW_VISION_API_KEY=替换为你的视觉APIKey
+KW_VISION_BASE_URL=https://视觉服务地址/v1
+KW_VISION_MODEL=替换为视觉模型ID</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>载入视觉配置 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制载入视觉配置 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d --force-recreate gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>载入视觉配置 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制载入视觉配置 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway up -d --force-recreate gateway</code></pre></div><p>发一条公开图文笔记链接，确认收到归档完成，打开记录检查图片内容提炼结果。三项必须一起填写；图片会发送给你配置的视觉服务。</p></div></details>
+<details class="guide-detail"><summary>视频转录 · 默认本地 Whisper</summary><div><p>模板默认已启用本地转录，Docker 内包含 FFmpeg。保留以下配置即可：</p><div class="guide-code" ><div class="guide-code-head"><span>dotenv · 本地转录</span><button type="button" class="guide-copy" aria-label="复制dotenv · 本地转录">复制</button></div><pre tabindex="0"><code>KW_ASR_PROVIDER=faster_whisper
+KW_TEMP_STORAGE_PROVIDER=local
+KW_FASTER_WHISPER_MODEL=small
+KW_FASTER_WHISPER_DEVICE=cpu
+KW_FASTER_WHISPER_COMPUTE_TYPE=int8</code></pre></div><p>首次处理视频会下载模型，模型缓存保存在 asr-models 卷中。下载需要可用网络，CPU 转录耗时随视频长度与机器性能变化。发一条短的公开视频链接，等待归档后检查转录内容和摘要。B站只分析简介与语音，不理解视频画面。</p><p>如果从腾讯 ASR 切回本地，先重新构建镜像再创建 Gateway：</p><div class="guide-code" data-db="new"><div class="guide-code-head"><span>切换转录方式 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制切换转录方式 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml build app
+docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d --force-recreate gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>切换转录方式 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制切换转录方式 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose build app
+docker compose --profile gateway up -d --force-recreate gateway</code></pre></div></div></details>
+<details class="guide-detail"><summary>腾讯云 ASR · 私有 COS 中转</summary><div><ol><li>在腾讯云开通录音文件识别服务。</li><li>在 COS 创建你账号下的存储桶，访问权限选择私有，记录地域和完整 Bucket 名。</li><li>为专用访问凭据授权所需 ASR 调用及该 Bucket 下对象上传、读取和删除权限，获取 AppID、SecretId 和 SecretKey。</li><li>修改下面配置，替换占位值后重新构建并创建 Gateway。</li></ol><div class="guide-code" ><div class="guide-code-head"><span>dotenv · 腾讯转录</span><button type="button" class="guide-copy" aria-label="复制dotenv · 腾讯转录">复制</button></div><pre tabindex="0"><code>KW_ASR_PROVIDER=tencent
+KW_TEMP_STORAGE_PROVIDER=tencent_cos
+# 腾讯云账号与访问凭据。
+KW_TENCENTCLOUD_APP_ID=替换为账号AppID
+KW_TENCENTCLOUD_SECRET_ID=替换为SecretId
+KW_TENCENTCLOUD_SECRET_KEY=替换为SecretKey
+# 私有存储桶的地域和完整名称。
+KW_COS_REGION=ap-shanghai
+KW_COS_BUCKET=你的桶名-你的AppID</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>重新构建并切换腾讯 ASR · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制重新构建并切换腾讯 ASR · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml build app
+docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d --force-recreate gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>重新构建并切换腾讯 ASR · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制重新构建并切换腾讯 ASR · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose build app
+docker compose --profile gateway up -d --force-recreate gateway</code></pre></div><p>发送一条短视频验证转录和归档。临时音频通过私有 COS 的短时访问地址供 ASR 读取，默认在任务结束后清理。腾讯云服务按其规则计费；仅修改 ASR 配置后 restart 不足以完成切换。</p></div></details>
+<details class="guide-detail"><summary>小红书访问受限时 · 配置自己的网页会话</summary><div><ol><li>先在自己的浏览器打开原始分享链接，确认笔记可见；需要时自行登录并完成验证。</li><li>打开开发者工具的 Network（网络）面板并刷新，选择发往 www.xiaohongshu.com 或 xiaohongshu.com 的页面请求。</li><li>从 Request Headers 复制 Cookie 的值，不包含 Cookie: 前缀，写入本机 .env：</li></ol><div class="guide-code" ><div class="guide-code-head"><span>dotenv · 可选会话</span><button type="button" class="guide-copy" aria-label="复制dotenv · 可选会话">复制</button></div><pre tabindex="0"><code>KW_XIAOHONGSHU_COOKIE=&#x27;a1=你的实际值; web_session=你的实际值&#x27;</code></pre></div><div class="guide-code" data-db="new"><div class="guide-code-head"><span>重新载入会话 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制重新载入会话 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway up -d --force-recreate gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>重新载入会话 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制重新载入会话 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway up -d --force-recreate gateway</code></pre></div><p>重新发送原分享链接，确认内容提取和最终归档均成功。Cookie 不需要重建镜像，但需要重建容器；代码首次升级时需先 build。不要提交或分享 Cookie。会话不能保证绕过验证或限流；遇到验证请回浏览器处理，遇到限流稍后再试，程序不会自动登录。</p></div></details></article>
+<article class="guide-step" id="setup-help"><h3>遇到问题，从这里检查</h3><details class="guide-detail"><summary>Docker 无法连接</summary><div><p>打开 Docker Desktop 或启动 Docker 服务，再运行 docker info。Linux 若提示权限不足，按官方安装说明配置当前账号的 Docker 访问权限。</p></div></details><details class="guide-detail"><summary>数据库不可达或认证失败</summary><div><p>新建数据库先检查 postgres 是否 healthy，确认两处密码一致。已有数据库检查地址、端口、监听规则与防火墙；不要使用容器内 localhost 连接宿主机。已有数据卷的密码不能只改 .env 来重置。</p></div></details><details class="guide-detail"><summary>提示缺少配置、REPLACE_ME 或格式错误</summary><div><p>确认文件名为 .env 且位于项目根目录，六项必填字段均已替换。视觉三项要么全不填，要么全部填写。修改后重新创建 Gateway。</p></div></details><details class="guide-detail"><summary>飞书提示未建立长连接</summary><div><p>检查 gateway 是否持续运行、应用 App ID 和 App Secret 是否匹配、部署环境能否访问飞书。保持 Gateway 运行，再回控制台保存长连接方式。</p></div></details><details class="guide-detail"><summary>机器人无回复、权限不足或工作区无法访问</summary><div><p>确认订阅 im.message.receive_v1、应用范围包含自己、权限和新版本已发布并审核通过；重新运行 init-feishu，再发送真实支持链接。首次私聊前工作区链接可能还未授予你访问权。</p></div></details><details class="guide-detail"><summary>模型接口鉴权失败或找不到模型</summary><div><p>核对供应商控制台的 API Key、额度、模型 ID 及兼容 Base URL。不要把完整 chat/completions 路径填进 Base URL。修改 .env 后重新创建 Gateway，再重新发送内容链接。</p></div></details><details class="guide-detail"><summary>视频模型下载失败或处理慢</summary><div><p>确认部署机器能访问模型下载源，检查磁盘和内存。首次下载和 CPU 转录需等待，可先用文字链接确认主线。也可按上方步骤改用腾讯 ASR，并重新构建镜像。</p></div></details><div class="guide-code" data-db="new"><div class="guide-code-head"><span>排错 · 查看状态和近期日志 · 新建数据库</span><button type="button" class="guide-copy" aria-label="复制排错 · 查看状态和近期日志 · 新建数据库">复制</button></div><pre tabindex="0"><code>docker compose -f compose.yml -f compose.postgres.yml --profile gateway ps
+docker compose -f compose.yml -f compose.postgres.yml logs --tail 100 gateway</code></pre></div><div class="guide-code" data-db="existing"><div class="guide-code-head"><span>排错 · 查看状态和近期日志 · 已有数据库</span><button type="button" class="guide-copy" aria-label="复制排错 · 查看状态和近期日志 · 已有数据库">复制</button></div><pre tabindex="0"><code>docker compose --profile gateway ps
+docker compose logs --tail 100 gateway</code></pre></div><p class="guide-note">寻求帮助时说明卡在哪一步和错误信息；先隐藏密钥、Cookie 和带令牌的链接。</p></article>
+</div></div><p class="guide-status" id="guide-copy-status" role="status" aria-live="polite"></p></section>
   </div>
 
   <footer>

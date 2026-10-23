@@ -1,0 +1,36 @@
+# 可选本地数据库：与 compose.yml 一起使用，不改变默认外部 PostgreSQL 部署方式。
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      # 初始化知归专用数据库。
+      POSTGRES_DB: knowwhere
+      # 初始化知归数据库用户。
+      POSTGRES_USER: knowwhere
+      # 本地数据库密码必须显式提供，不能使用空值或内置默认密码。
+      POSTGRES_PASSWORD: ${KW_POSTGRES_PASSWORD:?请在 .env 中填写 KW_POSTGRES_PASSWORD}
+    volumes:
+      # 数据持久化到当前 Compose 项目的命名卷，不向宿主机暴露数据库端口。
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # 双美元符号保留容器环境变量，避免 Compose 在宿主机提前展开。
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  app:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  # PostgreSQL 持久化数据；停止服务时不要使用 down -v 删除知识库快照。
+  postgres-data:
