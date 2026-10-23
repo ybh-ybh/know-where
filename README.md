@@ -1,324 +1,198 @@
 ![知归 KnowWhere Banner](docs/assets/banner.png)
+
 # 知归（KnowWhere）
 
-> 让散落的信息汇聚起来，沉淀为自己的知识。
+把文章、GitHub 仓库或图文视频链接发给飞书机器人，自动提取内容、生成分类和摘要，并归档到飞书多维表格，方便之后回顾、阅读和补充笔记。
 
-知归是一个面向个人使用的 AI 知识归档工具。把内容链接发送给飞书机器人，知归会自动完成内容提取、AI 分类与总结，并将结果沉淀到飞书多维表格中。
+KnowWhere is a self-hosted Feishu bot that extracts, summarizes, and organizes links into a personal knowledge base in Feishu Bitable.
 
-KnowWhere: a self-hosted Feishu(Lark) bot that turns WeChat/Douyin/Xiaohongshu/Bilibili links into an AI-summarized knowledge base in Feishu Bitable.
+[项目网站](https://ybh-ybh.github.io/know-where/) · [完整部署教程](https://ybh-ybh.github.io/know-where/#quickstart) · [支持平台](#支持的平台) · [开发与贡献](#开发与贡献)
 
-## 为什么做知归
+## 使用效果
 
-在信息爆炸的时代，我们可以从微信公众号、技术社区、开源项目和内容平台持续获取高质量知识，但这些信息往往散落在收藏夹、聊天记录和不同 App 中：收藏很容易，回顾很困难；信息越来越多，真正沉淀下来的知识却很少。
+发送一个受支持的链接后，机器人会先回复“知归已收到，正在提取、总结并归档。”，处理完成后返回飞书记录链接。
 
-知归希望解决的不是“再找一个地方收藏链接”，而是把零散内容转化成可以长期检索、分类、阅读和复用的个人知识资产：
+打开记录可以查看原始链接、正文或转录，以及 AI 生成的标题、分类、标签、摘要和关键观点。新内容默认标记为“未读”，可以继续填写阅读时间和阅读笔记。
 
-1. 在平时最顺手的入口——飞书私聊——发送链接。
-2. 自动提取文章正文、仓库 README、图文内容或视频语音。
-3. 用 AI 生成简短标题、分类、标签、摘要和关键观点。
-4. 将原文、分析结果和阅读状态统一归档到飞书多维表格。
+![知归飞书多维表格实际归档效果，展示平台、内容类型、分类、摘要与阅读状态](docs/assets/feishu-bitable-preview.png)
 
-## 已有功能
+飞书多维表格中的真实归档记录：文章、视频和图文统一整理，可按分类浏览并管理阅读状态。截图中的部分内容已做模糊处理。
 
-### 支持的内容来源
+<!-- 待补充同一条归档内容的已脱敏飞书私聊回执截图。 -->
 
-| 来源 | 支持内容 | 当前处理方式 |
+## 为什么使用知归
+
+- **随手发个链接，剩下自动完成**：在飞书私聊里发送内容，由知归完成提取、分析和归档，无需逐项复制整理。
+- **散落各个平台，统一收进知识库**：文章、仓库 README、图文和视频语音集中管理，保留原始链接和来源信息。
+- **长文和视频，先看懂重点**：通过摘要和关键观点判断是否值得细读，再回到正文或原链接深入阅读。
+- **按自己的习惯，整理和消化**：在飞书中扩展“一级分类”选项，使用未读、分类等视图回顾，并维护自己的阅读笔记。
+
+处理流程：发送链接 → 提取内容 → AI 分类与总结 → 飞书归档；PostgreSQL 保存任务状态与处理结果。
+
+## 支持的平台
+
+| 来源 | 支持内容 | 处理方式与要求 |
 | --- | --- | --- |
-| 微信公众号 | 公开文章 | 提取标题、作者、发布时间和正文 |
-| 稀土掘金 | 公开文章 | 提取标题、作者、发布时间和正文 |
-| GitHub | 公开仓库主页 | 提取默认分支根目录 README |
-| 小红书 | 公开图文、视频，分享短链 | 图文按顺序进行视觉理解；视频提取音频并转录 |
-| 抖音 | 公开图文、视频，分享短链 | 图文按顺序进行视觉理解；视频提取音频并转录 |
-| B站 | 公开视频、分享短链、分 P | 下载 DASH 音轨并转录，不分析视频画面 |
+| 微信公众号 | 公开文章 | 提取标题、作者、发布时间和正文；需要文本模型 |
+| 稀土掘金 | 公开文章 | 提取标题、作者、发布时间和正文；需要文本模型 |
+| GitHub | 公开仓库主页 | 提取默认分支根目录 README；需要文本模型 |
+| 小红书 | 公开图文、视频及分享短链 | 图文另需视觉模型；视频转录后总结；部分访问需要网页会话 |
+| 抖音 | 公开图文、视频及分享短链 | 图文另需视觉模型；视频转录后总结 |
+| B站 | 公开视频、分享短链及分 P | 提取简介、下载音轨并转录后总结，不分析视频画面 |
 
-### 内容归档
+所有内容最终都使用文本模型分类和总结。视频默认使用本地 `faster-whisper` 转录，无需云端 ASR 凭据。平台登录、验证、限流或页面变化可能影响提取。
 
-- 通过飞书官方 SDK 建立长连接，无需公网域名或 Webhook 回调地址。
-- 自动创建并幂等维护“知归”多维表格、字段和常用视图。
-- 首次合法私聊时将表格所有权交给使用者，用户可在飞书中直接移动或删除归档空间。
-- 保存原始标题、原始链接、作者、发布时间、完整正文或转录等来源信息。
-- AI 生成简短标题、一级分类、标签、一句话摘要、详细摘要和关键观点。
-- 提供收件箱、未读、按分类浏览、待处理与处理中、全文、系统信息等视图。
-- 新内容默认标记为“未读”，可在飞书中维护阅读状态、阅读时间和阅读笔记。
-- 直接读取飞书“一级分类”字段中的选项，因此可以在飞书中扩展自己的分类体系。
+## 开始使用
 
-### 稳定性与可替换能力
+推荐使用 Docker Compose，完整操作见[页面内部署教程](https://ybh-ybh.github.io/know-where/#quickstart)，包含 Windows、macOS、Linux 和两种数据库路径。
 
-- PostgreSQL 保存任务状态、提取正文、AI 结果和飞书归档引用。
-- 使用规范链接和平台内容 ID 做幂等处理，避免重复归档。
-- AI 输出经过 JSON Schema 校验；格式错误时会尝试一次修复，仍失败则明确降级。
-- 媒体文件流式下载并限制大小，临时文件默认在任务结束后清理。
+项目网站由 GitHub Pages 托管，提供介绍与教程；机器人服务需要在你自己的电脑或服务器上持续运行。飞书通过长连接接收事件，无需公网域名或 Webhook 回调地址。
 
-## 工作流程
+### 部署前准备
+
+| 项目 | 要求 |
+| --- | --- |
+| 运行设备 | 可持续运行 Docker 的电脑或服务器；视频转录会增加 CPU、内存和磁盘开销 |
+| 工具 | Git；Windows/macOS 使用 Docker Desktop，Linux 使用 Docker Engine 和 Compose 插件 |
+| 飞书应用 | 可创建企业自建应用并启用机器人；个人使用请将应用可用范围设为自己 |
+| 文本模型 | 提供 OpenAI 兼容 Chat Completions 接口的 API Key、Base URL 和模型 ID |
+| PostgreSQL | 使用仓库提供的可选数据库容器，或准备一个容器可访问的已有数据库 |
+
+Docker 镜像已包含 Python、uv 和 FFmpeg，本机无需另外安装。文本模型、视觉模型和可选腾讯云服务的费用由你选择的供应商收取；本地转录使用运行设备的计算资源。
+
+### 部署导览
+
+先拉取项目，后续操作都在项目目录执行：
+
+```sh
+git clone https://github.com/ybh-ybh/know-where.git
+cd know-where
+```
+
+接下来按[完整教程](https://ybh-ybh.github.io/know-where/#quickstart)依次完成：
+
+1. 复制 `.env.example` 为 `.env`；Windows PowerShell 使用 `Copy-Item .env.example .env`，macOS/Linux 使用 `cp .env.example .env`。
+2. 创建飞书应用、启用机器人并申请权限，获取 App ID 和 App Secret；事件订阅和发布留到 Gateway 启动后完成。
+3. 填写六项主线配置：`KW_DATABASE_URL`、`KW_FEISHU_APP_ID`、`KW_FEISHU_APP_SECRET`、`KW_LLM_API_KEY`、`KW_LLM_BASE_URL`、`KW_LLM_MODEL`。Base URL 填接口根地址，不追加 `/chat/completions`。
+4. 准备 PostgreSQL：默认 `compose.yml` 使用已有数据库；新建数据库时显式叠加 `compose.postgres.yml`，并填写 `KW_POSTGRES_PASSWORD` 和对应连接地址。
+5. 构建镜像、执行 `migrate-and-health`，再启动 Gateway。健康检查成功输出为 `OK: migrations + config + postgresql`。
+6. 保持 Gateway 运行，配置飞书长连接、订阅 `im.message.receive_v1` 并发布应用；权限生效后执行 `init-feishu`。
+7. 在机器人私聊发送第一条链接，确认能打开归档记录。
+
+新建数据库配置使用 PostgreSQL 17、命名卷持久化和健康检查，不发布主机端口。已有数据库的地址必须从容器可达，容器中的 `localhost` 指向容器自身。密码包含特殊字符时，需要对连接地址中的密码部分进行 URL 编码。
+
+### 首次归档验收
+
+建议先发送本项目的仓库链接，验证文字内容链路：
 
 ```text
-飞书私聊 / CLI
-  → 识别内容平台
-  → 提取文章、README、图文或视频语音
-  → 视觉理解 / 语音转录（按内容类型选择）
-  → 读取飞书分类目录
-  → AI 生成分类与摘要
-  → 写入飞书多维表格
-  → PostgreSQL 保存任务快照
+https://github.com/ybh-ybh/know-where
 ```
 
-完整数据流可以查看[交互式架构图](docs/diagrams/knowwhere-dataflow.html)或[技术架构文档](docs/TECHNICAL_ARCHITECTURE.md)。
+收到“归档完成”后，打开返回的记录，确认标题、原始链接、分类、摘要和关键观点均可查看。容器正在运行或数据库检查通过，只验证了部署的一部分；第一条真实内容成功归档才完成主线验收。
 
-## 最小启动方式
+`init-feishu` 输出的 `workspace_url` 是归档空间链接，用户访问授权由首次包含受支持链接的有效私聊触发。应用没有锁定首位用户的白名单；其他可用范围内用户发送有效链接，也可能获得同一归档空间的完整权限。详见[飞书配置指南](docs/FEISHU_SETUP.md)。
 
-推荐使用 Docker Compose。Compose 只运行知归本身，不会创建 PostgreSQL；开始前需要准备：
+## 可选能力
 
-- Docker Desktop；
-- 一个知归可访问的 PostgreSQL 数据库；
-- 一个已发布的飞书企业自建应用；
-- 一个提供 Chat Completions 接口的 OpenAI 兼容文本模型。
+| 能力 | 何时需要 | 配置入口 |
+| --- | --- | --- |
+| 图文视觉理解 | 归档小红书或抖音图文 | [配置视觉模型](docs/ADVANCED_USAGE.md#图文视觉理解) |
+| 视频语音转录 | 默认本地转录；也可切换腾讯 ASR 与私有 COS | [配置转录](docs/ADVANCED_USAGE.md#视频语音转录) |
+| 小红书网页会话 | 公开笔记被引导至登录页时 | [配置 Cookie](docs/ADVANCED_USAGE.md#小红书网页会话) |
+| 媒体和配置文件调整 | 修改大小、超时、临时目录或使用替代配置文件 | [进阶使用说明](docs/ADVANCED_USAGE.md) |
 
-### 1. 配置飞书应用
+全部配置字段和默认值见 [`.env.example`](.env.example)。
 
-在飞书开放平台创建企业自建应用并启用机器人能力，至少申请以下权限：
+## 常见问题与使用边界
 
-| 权限标识 | 用途 |
-| --- | --- |
-| `im:message.p2p_msg:readonly` | 接收发给机器人的私聊消息 |
-| `im:message:send_as_bot` | 回复处理状态和归档链接 |
-| `bitable:app` | 创建并维护多维表格与记录 |
-| `drive:drive.metadata:readonly` | 读取归档空间所有者，避免重复转移所有权 |
-| `docs:doc` | 管理归档所需的飞书文档能力 |
-| `docs:permission.member:create` | 将使用者添加为归档空间协作者；控制台未拆分该权限时无需单独选择 |
+**修改 `.env` 后怎样生效？**
 
-在事件订阅中选择“使用长连接接收事件”，添加 `im.message.receive_v1`，然后创建并发布应用版本。个人使用时，建议把应用可用范围只设置为自己。
+Docker 部署需要重新创建 Gateway 容器，单纯 `restart` 不会重新加载环境变量。切换 ASR 供应商还需重新构建镜像，详见[配置生效方式](docs/ADVANCED_USAGE.md#让配置生效)。
 
-完整操作见[飞书应用配置指南](docs/FEISHU_SETUP.md)。
+**怎样更新和备份？**
 
-### 2. 填写最小配置
+等待正在处理的任务结束，停止 Gateway，备份数据库，再执行 `git pull --ff-only`、重新构建、迁移检查及重新创建 Gateway。备份应保存在容器外；停止容器时不要使用 `down -v` 删除数据卷。命令见[完整部署与维护教程](https://ybh-ybh.github.io/know-where/#quickstart)。
 
-复制环境变量模板：
+**重复发送链接会怎样？**
 
-```powershell
-Copy-Item .env.example .env
-```
+已成功归档的同一规范链接，在对应飞书记录仍存在时会复用已有记录。当前仍会先执行内容提取，不保证跳过下载或转录。
 
-编辑 `.env`，最少填写以下 6 项：
+**“部分成功”是什么意思？**
 
-```dotenv
-KW_DATABASE_URL=postgresql+psycopg://用户名:密码@数据库地址:5432/knowwhere
+模型输出格式不合格时会尝试一次修复；再次不合格时使用启发式结果，并标记“部分成功”和“待人工复核”。提取证据不完整也可能标为部分成功。鉴权、网络或接口异常仍可能导致任务失败。
 
-KW_FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
-KW_FEISHU_APP_SECRET=xxxxxxxxxxxxxxxx
+**长内容是否全部参与总结？**
 
-KW_LLM_API_KEY=sk-xxxxxxxx
-KW_LLM_BASE_URL=https://你的模型服务地址/v1
-KW_LLM_MODEL=你的模型ID
-```
+当前文本模型输入取提取正文的前 40,000 个字符。归档正文与模型输入范围不同，长文章或长视频的摘要可能未覆盖后半段内容。
 
-如果数据库密码包含特殊字符，需要先进行 URL 编码。
+其他边界：
 
-### 3. 启动 Gateway
+- 面向公开内容，不支持私密、付费或已删除内容；部分平台需要有效网页会话，仍受验证与限流影响。
+- 飞书入口只处理私聊，一条消息只取第一个受支持链接。
+- GitHub 只接受仓库主页，要求公开仓库有可读取的默认分支根目录 README。
+- 视频基于配文、简介与语音转录总结，不理解视频画面；速度受网络、媒体大小和模型性能影响。
+- 当前通过飞书表格回顾和管理内容，未提供机器人知识问答或独立搜索页面。
 
-```powershell
-docker compose build
-docker compose run --rm app init-feishu
-docker compose --profile gateway up -d gateway
-docker compose --profile gateway ps
-```
-
-`docker compose build` 会读取 `.env` 中的 `KW_ASR_PROVIDER`：选择 `tencent` 时不安装
-`faster-whisper`、CTranslate2、ONNX Runtime 和 PyAV 等本地推理依赖；选择
-`faster_whisper` 时会安装完整的本地 ASR 依赖。修改该配置后必须重新构建镜像。
-
-打开飞书中的机器人私聊，发送一条受支持的内容链接。机器人会先回复接收状态，处理完成后返回飞书记录链接。
-
-查看运行日志：
-
-```powershell
-docker compose logs -f gateway
-```
-
-停止服务：
-
-```powershell
-docker compose --profile gateway down
-```
-
-该命令只停止知归容器，不会停止或删除外部 PostgreSQL。
-
-### 不启动机器人，直接处理链接
-
-如果只想验证单条内容，可以通过 CLI 完成同一条归档链路：
-
-```powershell
-docker compose run --rm app process "https://mp.weixin.qq.com/s/文章ID"
-```
-
-## 可选配置
-
-所有配置及默认值都在 [`.env.example`](.env.example) 中。以下配置只在对应能力启用时需要修改。
-
-### 小红书网页会话
-
-默认匿名请求小红书页面。若机器人提示“访问被引导至登录页”，可以配置浏览器会话：
-
-1. 在自己的浏览器打开原始分享链接，确认笔记可以正常显示。
-2. 在开发者工具的 Network（网络）中刷新页面，选择发往
-   `www.xiaohongshu.com` 或 `xiaohongshu.com` 的页面请求，复制请求头中
-   `Cookie` 的值（不包含 `Cookie:` 前缀）。可以先尝试未登录浏览器的 Cookie；
-   如果浏览器本身要求登录，完成登录后重新获取。
-3. 在本地 `.env` 中填写单行配置，保留原有分号、等号和空格：
-
-```dotenv
-KW_XIAOHONGSHU_COOKIE='a1=你的实际值; web_session=你的实际值'
-```
-
-Cookie 只用于上述两个页面主机，不发往 `xhslink.cn`、`xhslink.com` 或媒体 CDN。
-不要把 Cookie 发给机器人或提交到仓库。程序会隐藏配置显示中的 Cookie，页面请求错误
-也不会回显完整 URL 或访问令牌。原始分享链接仍按现有归档流程保存；其中的
-`xsec_token`、`xsec_source` 会保留用于页面访问，去重用的规范链接不携带这些参数。
-
-配置在启动时读取。代码首次升级时先执行 `docker compose build`；之后仅更新 Cookie
-不需要重建镜像，但需要重新创建 Gateway 容器（仅 `restart` 不会重新加载 `.env`）：
-
-```powershell
-docker compose --profile gateway up -d --force-recreate gateway
-```
-
-本地运行则重新启动 Gateway 进程。更新后重新发送原分享链接作为一条新消息。
-登录跳转不能单独证明 Cookie 已过期；配置 Cookie 后仍失败时，先确认浏览器能打开
-同一链接，再检查会话和部署环境的访问条件。限流时稍后再试，验证或安全拦截需要先在
-浏览器确认。程序不会自动登录、执行浏览器验证或循环重试这些访问错误。
-
-HTTP 200 不代表提取成功：程序还会验证目标笔记 ID 和页面数据。验收应分别确认页面
-提取、媒体下载及后续视觉理解/转录和归档；匿名访问失败时，Cookie 方案仍需真实会话验证。
-
-### 图文视觉理解
-
-归档小红书或抖音图文时，需要同时配置：
-
-```dotenv
-KW_VISION_API_KEY=xxxxxxxx
-KW_VISION_BASE_URL=https://视觉模型服务地址/v1
-KW_VISION_MODEL=视觉模型ID
-```
-
-视觉接口采用 OpenAI 兼容格式，本地图片会以 Base64 形式发送给视觉模型。
-
-### 视频语音转录
-
-默认使用本地 `faster-whisper`，无需云端 ASR 凭据：
-
-```dotenv
-KW_ASR_PROVIDER=faster_whisper
-KW_TEMP_STORAGE_PROVIDER=local
-KW_FASTER_WHISPER_MODEL=small
-KW_FASTER_WHISPER_DEVICE=cpu
-KW_FASTER_WHISPER_COMPUTE_TYPE=int8
-```
-
-首次处理视频时会下载模型。可以通过 `KW_FASTER_WHISPER_MODEL_DIR` 指定模型缓存目录；具备可用 NVIDIA CUDA 运行环境时，可将设备改为 `cuda`、计算类型改为 `float16`。
-
-也可以切换到腾讯云录音文件识别：
-
-```dotenv
-KW_ASR_PROVIDER=tencent
-KW_TEMP_STORAGE_PROVIDER=tencent_cos
-
-KW_TENCENTCLOUD_APP_ID=xxxxxxxx
-KW_TENCENTCLOUD_SECRET_ID=xxxxxxxx
-KW_TENCENTCLOUD_SECRET_KEY=xxxxxxxx
-KW_COS_REGION=ap-shanghai
-KW_COS_BUCKET=knowwhere-temp-1250000000
-```
-
-腾讯 ASR 必须搭配私有 COS Bucket。知归会上传临时音频、生成短时访问地址，在任务结束后按清理策略删除中转对象。
-
-### 临时文件与媒体限制
-
-| 配置 | 作用 |
-| --- | --- |
-| `KW_TEMP_LOCAL_ROOT` | 指定媒体下载、FFmpeg 和本地 ASR 的工作目录 |
-| `KW_TEMP_DELETE_AFTER_PROCESS` | 是否在成功或失败后删除临时产物，默认 `true` |
-| `KW_FFMPEG_PATH` | 指定 FFmpeg 可执行文件名或绝对路径 |
-| `KW_*_REQUEST_TIMEOUT_SECONDS` | 调整各内容平台的请求超时 |
-| `KW_*_MAX_IMAGE_BYTES` | 限制单张图片大小 |
-| `KW_*_MAX_VIDEO_BYTES` | 限制单个视频大小 |
-| `KW_BILIBILI_MAX_AUDIO_BYTES` | 限制 B站音频大小 |
-
-### 使用其他配置文件
-
-命令默认读取项目根目录的 `.env`。可以传入其他文件：
-
-```powershell
-uv run knowwhere health --env-file D:\config\knowwhere.env
-```
-
-配置优先级为：进程环境变量 > `--env-file` 指定文件 > 根目录 `.env`。
-
-## 本地开发
-
-本地运行需要 Python 3.12 和 [uv](https://docs.astral.sh/uv/)。处理视频时还需要 FFmpeg。
-
-```powershell
-uv sync --all-groups --extra local-asr
-uv run knowwhere migrate-and-health
-uv run knowwhere init-feishu
-uv run knowwhere gateway
-```
-
-以上命令适用于默认的本地 ASR。仅使用腾讯云 ASR 时可执行 `uv sync --all-groups`，
-无需安装 `local-asr` 可选依赖。
-
-常用命令：
-
-| 命令 | 用途 |
-| --- | --- |
-| `uv run knowwhere health` | 校验配置和 PostgreSQL 连接 |
-| `uv run knowwhere migrate-and-health` | 执行数据库迁移并检查连接 |
-| `uv run knowwhere init-feishu` | 幂等创建或升级飞书归档空间 |
-| `uv run knowwhere process "<URL>"` | 处理一条受支持的内容链接 |
-| `uv run knowwhere gateway` | 启动飞书长连接机器人 |
-| `uv run knowwhere fake-smoke` | 运行不访问网络和数据库的接线冒烟测试 |
-
-运行项目检查：
-
-```powershell
-uv run ruff check .
-uv run mypy src/knowwhere
-uv run pytest
-```
-
-## 当前边界
-
-- 只处理无需登录即可访问的公开内容，不支持私密、付费或已删除内容。
-- 飞书入口面向个人私聊；一条消息只处理识别到的第一个受支持链接。
-- GitHub 只接受仓库主页链接，并要求公开仓库存在可读取的 README。
-- B站当前只把视频简介和语音转录作为总结依据，不理解视频画面。
-- 小红书、抖音和 B站依赖平台公开页面或接口，平台结构调整可能导致提取暂时失效。
-- 图文或视频归档的速度受媒体大小、网络、模型性能和 ASR 方式影响。
+更多检查步骤见[网页部署教程](https://ybh-ybh.github.io/know-where/#quickstart)。
 
 ## 数据与隐私
 
-- 完整正文、转录、任务状态和归档引用会保存到你配置的 PostgreSQL；整理结果会写入飞书。
-- 文章正文会发送给你配置的文本模型；小红书和抖音图片会发送给你配置的视觉模型。
-- 本地 `faster-whisper` 不会把音频提交给云端 ASR；腾讯 ASR 模式会通过你自己的 COS Bucket 中转音频。
-- 本地临时媒体和 COS 中转对象默认在任务结束后删除，但模型缓存会保留以便复用。
-- 请自行确认内容来源、模型供应商、飞书和云服务的隐私政策与使用条款。
+- 提取正文或转录、任务状态、AI 结果和归档引用保存在你配置的 PostgreSQL；归档内容写入飞书。
+- 文章、README、图文理解文本和视频转录会按上述输入范围发送给配置的文本模型；小红书和抖音图文图片会发送给配置的视觉模型。
+- 本地 `faster-whisper` 不把音频提交给云端 ASR，但转录文本仍会用于模型总结。腾讯 ASR 模式通过你自己的私有 COS Bucket 中转音频，再交给腾讯 ASR 识别。
+- 本地临时媒体和 COS 中转对象默认在任务结束后清理，模型缓存保留以便复用。数据库和飞书中的归档内容不随临时文件清理而删除。
+- 不要提交 `.env`、API Key 或 Cookie。原始分享链接可能含访问令牌，会作为来源信息归档；分享记录或截图前请检查并脱敏。
 
-## 项目结构
+## 开发与贡献
+
+本地运行需要 Python 3.12、[uv](https://docs.astral.sh/uv/) 和已配置的 PostgreSQL；处理视频还需 FFmpeg。从项目根目录运行：
+
+```sh
+uv sync --all-groups --extra local-asr
+uv run knowwhere migrate-and-health
+uv run knowwhere gateway
+```
+
+运行前按部署教程填写 `.env`。首次配置飞书时，保持 Gateway 运行，在控制台完成事件订阅与发布，再在另一个终端执行 `uv run knowwhere init-feishu`。已有应用权限生效后可直接运行。仅使用腾讯 ASR 时，安装命令改为 `uv sync --all-groups`。
+
+| 命令 | 用途 |
+| --- | --- |
+| `uv run knowwhere health` | 校验配置和数据库连接，不验证飞书或模型服务 |
+| `uv run knowwhere migrate-and-health` | 执行数据库迁移并检查连接 |
+| `uv run knowwhere init-feishu` | 幂等创建或升级飞书归档空间 |
+| `uv run knowwhere process "<URL>"` | 通过 CLI 处理单条链接，仍会调用模型和飞书 |
+| `uv run knowwhere gateway` | 启动飞书长连接机器人 |
+| `uv run knowwhere fake-smoke` | 不访问网络和数据库的接线冒烟测试 |
+
+提交改动前运行与改动相关的检查；项目检查命令为：
+
+```sh
+uv run ruff check .
+uv run mypy src/knowwhere
+uv run pytest
+git diff --check
+```
+
+报告问题时请附上平台、部署方式、复现步骤和脱敏错误信息；贡献代码时说明改动目的与验证结果。
 
 ```text
 src/knowwhere/domain/          领域对象与任务状态机
-src/knowwhere/application/     处理流水线与供应商无关端口
-src/knowwhere/adapters/        内容平台、LLM、视觉、ASR 与飞书适配器
-src/knowwhere/infrastructure/  PostgreSQL 数据模型与仓储
+src/knowwhere/application/     处理流水线与端口
+src/knowwhere/adapters/        平台、模型、转录与飞书适配器
+src/knowwhere/infrastructure/  数据库模型与仓储
 alembic/                       数据库迁移
 tests/                         离线回归测试
-docs/                          产品、架构、飞书配置与数据流文档
+docs/                          网页教程与项目文档
 ```
 
 ## 更多文档
 
-- [技术架构文档](docs/TECHNICAL_ARCHITECTURE.md)
+- [完整部署与维护教程](https://ybh-ybh.github.io/know-where/#quickstart)
 - [飞书应用配置指南](docs/FEISHU_SETUP.md)
-- [内容归档数据流图](docs/diagrams/knowwhere-dataflow.html)
+- [进阶使用说明](docs/ADVANCED_USAGE.md)
+- [技术架构文档](docs/TECHNICAL_ARCHITECTURE.md)（含设计目标，实现情况以当前代码为准）
+- [交互式数据流图](https://ybh-ybh.github.io/know-where/diagrams/knowwhere-dataflow.html)
 - [第三方软件与许可证说明](THIRD_PARTY_NOTICES.md)
 
 ## License
