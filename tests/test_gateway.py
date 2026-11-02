@@ -90,6 +90,25 @@ def test_extract_douyin_short_url_from_text_message() -> None:
     assert extract_supported_url(content) == "https://v.douyin.com/UrtPieUOn5c/"
 
 
+# Extract the reported short link from a complete Douyin share message.
+def test_extract_douyin_short_url_from_original_share_text() -> None:
+    """完整分享口令和话题不会污染作品短链。"""
+
+    # Preserve the user's share text surrounding the ordinary HTTPS URL.
+    content = json.dumps(
+        {
+            "text": (
+                "9.79 复制打开抖音，看看【小哲大模型八股的作品】"
+                "MoE到底是什么 # 小哲 # Agent # 大... "
+                "https://v.douyin.com/QiPXAFzL37U/ y@G.Iv 08/25 :2pm RKw:/"
+            )
+        },
+        ensure_ascii=False,
+    )
+
+    assert extract_supported_url(content) == "https://v.douyin.com/QiPXAFzL37U/"
+
+
 # 小红书分享短链应完整传给安全跳转解析器。
 def test_extract_xiaohongshu_short_url_from_text_message() -> None:
     """验证小红书图文或视频短链。"""

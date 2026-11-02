@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import secrets
 import subprocess
 from dataclasses import dataclass
@@ -29,6 +31,12 @@ DOUYIN_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 "
     "Safari/537.36 Edg/130.0.0.0"
+)
+# Public share pages require a mobile browser identity to include work data.
+DOUYIN_SHARE_USER_AGENT = (
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 "
+    "Mobile Safari/537.36"
 )
 # 允许参与短链跳转的精确抖音主机名。
 DOUYIN_HOSTS = frozenset({"v.douyin.com", "www.iesdouyin.com", "www.douyin.com"})
@@ -102,28 +110,56 @@ class DouyinWebResolver:
             "Accept-Language": "zh-CN,zh;q=0.9",
         }
 
-    # 解析用户短链并取得作品详情。
+    # Resolve public works and keep request tokens out of user-facing errors.
     def resolve(self, url: str) -> DouyinWork:
         """返回规范化抖音作品。"""
 
         # 去除分享文本可能携带的首尾空白。
         source_url = url.strip()
         self._validate_douyin_url(source_url)
-        # 短链最终落地地址。
-        resolved_url = self._follow_douyin_redirects(source_url)
-        # 从受支持路径读取纯数字作品 ID。
-        aweme_id, hinted_type = self._extract_aweme_id(resolved_url)
-        # 最后一份详情响应供循环结束后统一校验。
+        try:
+            # Stop at a recognized work URL without loading the desktop page.
+            resolved_url = self._follow_douyin_redirects(source_url)
+            # Preserve the work identity and the original media hint.
+            aweme_id, hinted_type = self._extract_aweme_id(resolved_url)
+            try:
+                # Keep the existing signed API as the primary detail source.
+                detail = self._request_web_detail(aweme_id)
+            except (httpx.HTTPError, ValueError):
+                detail = self._request_share_detail(aweme_id, hinted_type)
+        except httpx.TimeoutException:
+            raise ValueError("抖音作品请求超时，请稍后重试") from None
+        except httpx.HTTPStatusError as error:
+            # Expose only the status code, never signed URLs or device cookies.
+            status = error.response.status_code
+            if status in {401, 403}:
+                raise ValueError(
+                    f"抖音作品访问受限（HTTP {status}），请在浏览器确认原链接可访问后重试"
+                ) from None
+            if status == 429:
+                raise ValueError("抖音请求受到限流，请稍后重试") from None
+            raise ValueError(f"抖音作品请求失败（HTTP {status}），请稍后重试") from None
+        except httpx.RequestError:
+            raise ValueError("抖音作品网络请求失败，请检查网络后重试") from None
+        return self._to_work(source_url, aweme_id, hinted_type, detail)
+
+    # Preserve bounded retries for the existing signed web API.
+    def _request_web_detail(self, aweme_id: str) -> dict[str, Any]:
+        """读取网页版详情，失败时由调用方使用公开分享页。"""
+
+        # Keep the final response for validation after bounded retries.
         response: httpx.Response | None = None
+        # Retry only explicit fingerprint rejections.
         for _attempt_index in range(DOUYIN_DETAIL_MAX_ATTEMPTS):
-            # 每次尝试使用新的匿名设备 Cookie 和自洽签名。
+            # Register a fresh anonymous device for each attempt.
             ttwid = self._create_ttwid()
-            # 签名后的作品详情地址。
+            # Sign the parameters with the matching browser fingerprint.
             detail_url = self._build_detail_url(aweme_id)
-            # 作品详情响应。
+            # Never follow API redirects with the explicit device cookie.
             response = self._client.get(
                 detail_url,
                 headers={**self._headers, "Cookie": f"ttwid={ttwid};"},
+                follow_redirects=False,
             )
             if response.status_code != 403:
                 break
@@ -132,13 +168,66 @@ class DouyinWebResolver:
         response.raise_for_status()
         if not response.content:
             raise ValueError("抖音作品详情为空，可能触发了平台访问校验")
-        # 平台 JSON 载荷。
+        # Decode only object-shaped API responses.
         response_data = response.json()
-        # 作品详情对象。
+        if not isinstance(response_data, dict):
+            raise ValueError("抖音作品详情响应格式无效")
+        # Read the primary work object without using recommendation data.
         detail = response_data.get("aweme_detail")
-        if not isinstance(detail, dict):
+        if not isinstance(detail, dict) or not detail:
             raise ValueError("抖音作品详情响应缺少 aweme_detail")
-        return self._to_work(source_url, aweme_id, hinted_type, detail)
+        if "aweme_id" in detail and str(detail["aweme_id"]) != aweme_id:
+            raise ValueError("抖音作品详情返回了不匹配的作品 ID")
+        return detail
+
+    # Read the official public mobile page when the web API rejects the request.
+    def _request_share_detail(self, aweme_id: str, hinted_type: ContentType) -> dict[str, Any]:
+        """使用匿名设备读取分享页内嵌的目标作品数据。"""
+
+        # Anonymous registration is required even when the share page returns 200.
+        ttwid = self._create_ttwid()
+        # Keep the source media path when constructing the official share URL.
+        path_type = "note" if hinted_type is ContentType.IMAGE_TEXT else "video"
+        # The cookie is scoped to this explicit official request, without redirects.
+        response = self._client.get(
+            f"https://www.iesdouyin.com/share/{path_type}/{aweme_id}/",
+            headers={
+                **self._headers,
+                "User-Agent": DOUYIN_SHARE_USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,*/*",
+                "Cookie": f"ttwid={ttwid};",
+            },
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        # Anchor to an inline script instead of matching text inside a caption.
+        match = re.search(r"<script\b[^>]*>\s*window\._ROUTER_DATA\s*=\s*", response.text)
+        if match is None:
+            raise ValueError("抖音分享页没有公开作品数据，可能需要验证或作品已不可访问")
+        try:
+            # Decode one JSON value without evaluating JavaScript or truncating braces.
+            state, _end = json.JSONDecoder().raw_decode(response.text[match.end() :])
+        except json.JSONDecodeError:
+            raise ValueError("抖音分享页作品数据格式无效") from None
+        if not isinstance(state, dict) or not isinstance(state.get("loaderData"), dict):
+            raise ValueError("抖音分享页作品数据格式无效")
+        # Inspect only the observed work containers, not arbitrary nested objects.
+        for page_data in state["loaderData"].values():
+            if not isinstance(page_data, dict):
+                continue
+            # Read the work container observed in the public video share page.
+            video_info = page_data.get("videoInfoRes")
+            if not isinstance(video_info, dict):
+                continue
+            # The page can include recommendations before the requested item.
+            items = video_info.get("item_list")
+            if not isinstance(items, list):
+                continue
+            # Accept only the exact requested work identity.
+            for item in items:
+                if isinstance(item, dict) and str(item.get("aweme_id")) == aweme_id:
+                    return item
+        raise ValueError("抖音分享页没有返回目标作品，可能需要验证或作品已不可访问")
 
     # 在精确主机白名单内手动跟随分享短链。
     def _follow_douyin_redirects(self, url: str) -> str:
@@ -147,6 +236,12 @@ class DouyinWebResolver:
         # 当前跳转地址。
         current_url = url
         for _redirect_index in range(6):
+            try:
+                self._extract_aweme_id(current_url)
+            except ValueError:
+                pass
+            else:
+                return current_url
             # 每一跳都禁用客户端自动跳转。
             response = self._client.get(
                 current_url,
@@ -175,6 +270,7 @@ class DouyinWebResolver:
             TTWID_REGISTER_URL,
             content=TTWID_REGISTER_BODY,
             headers=self._headers,
+            follow_redirects=False,
         )
         response.raise_for_status()
         # Cookie 值只保留在当前解析调用中。

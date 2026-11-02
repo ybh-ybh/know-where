@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
+import pytest
 
 from knowwhere.adapters.douyin import (
     DouyinContentExtractor,
@@ -118,6 +120,206 @@ def test_resolver_retries_transient_detail_forbidden() -> None:
 
     assert work.aweme_id == aweme_id
     assert work.content_type is ContentType.IMAGE_TEXT
+
+
+# Use the reported public video's identity without making network requests.
+DOUYIN_TEST_VIDEO_ID = "7703036073350039025"
+
+
+# Build the public mobile page's embedded JSON instead of executing scripts.
+def _share_page_response(items: list[dict[str, object]]) -> httpx.Response:
+    """返回包含作品列表的移动分享页。"""
+
+    # Keep the fixture aligned with the observed public page schema.
+    state = {"loaderData": {"video_(id)/page": {"videoInfoRes": {"item_list": items}}}}
+    return httpx.Response(
+        200,
+        text=f"<html><script>window._ROUTER_DATA = {json.dumps(state)};</script></html>",
+    )
+
+
+# Model the two public sources and reject unexpected requests immediately.
+def _fallback_resolver_client(
+    api_response: httpx.Response,
+    share_response: httpx.Response | httpx.RequestError,
+    requests: list[httpx.Request],
+) -> httpx.Client:
+    """模拟详情失败与分享页后备路径。"""
+
+    # Record each request while keeping the test entirely offline.
+    def handler(request: httpx.Request) -> httpx.Response:
+        """返回明确配置的响应，禁止隐式访问其他页面。"""
+
+        requests.append(request)
+        if request.url.host == "v.douyin.com":
+            return httpx.Response(
+                302,
+                headers={
+                    "Location": f"https://www.iesdouyin.com/share/video/{DOUYIN_TEST_VIDEO_ID}/"
+                },
+            )
+        if request.url.host == "ttwid.bytedance.com":
+            return httpx.Response(200, headers={"Set-Cookie": "ttwid=anonymous-test; Path=/"})
+        if request.url.path == "/aweme/v1/web/aweme/detail/":
+            return api_response
+        if request.url.host == "www.iesdouyin.com":
+            assert request.url.path == f"/share/video/{DOUYIN_TEST_VIDEO_ID}/"
+            assert "Mobile" in request.headers["User-Agent"]
+            assert "ttwid=anonymous-test" in request.headers["Cookie"]
+            if isinstance(share_response, httpx.RequestError):
+                raise share_response
+            return share_response
+        raise AssertionError(
+            f"Unexpected public page request: {request.url.host}{request.url.path}"
+        )
+
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+
+# Recover from denial, empty bodies, malformed JSON, and changed API envelopes.
+@pytest.mark.parametrize(
+    "api_response",
+    [
+        httpx.Response(403, text="fingerprint rejected"),
+        httpx.Response(200, content=b""),
+        httpx.Response(200, text="<html>verification</html>"),
+        httpx.Response(200, json={"status_code": 0}),
+        httpx.Response(200, json={"aweme_detail": {}}),
+        httpx.Response(200, json=[]),
+    ],
+    ids=["forbidden", "empty", "not-json", "missing-detail", "empty-detail", "non-object"],
+)
+def test_resolver_falls_back_to_matching_public_share_work(api_response: httpx.Response) -> None:
+    """详情接口不可用时仍能提取目标视频，且不会误取推荐作品。"""
+
+    # Place an unrelated recommendation before the requested work.
+    items: list[dict[str, object]] = [
+        {"aweme_id": "123456", "desc": "无关推荐"},
+        {
+            "aweme_id": DOUYIN_TEST_VIDEO_ID,
+            "desc": 'MoE到底是什么 }; "专家" # Agent',
+            "author": {"nickname": "小哲大模型八股"},
+            "create_time": 1793530800,
+            "video": {
+                "duration": 325544,
+                "play_addr": {"url_list": ["https://aweme.snssdk.com/aweme/v1/playwm/"]},
+            },
+        },
+    ]
+    # Observe network boundaries without inspecting private resolver methods.
+    requests: list[httpx.Request] = []
+    # Keep the production signature and mapping code active.
+    resolver = DouyinWebResolver(
+        DouyinSettings(),
+        _fallback_resolver_client(api_response, _share_page_response(items), requests),
+    )
+
+    # Resolve the exact short link reported by the user.
+    work = resolver.resolve("https://v.douyin.com/QiPXAFzL37U/")
+
+    assert work.aweme_id == DOUYIN_TEST_VIDEO_ID
+    assert work.title == 'MoE到底是什么 }; "专家" # Agent'
+    assert work.author == "小哲大模型八股"
+    assert work.content_type is ContentType.VIDEO
+    assert work.duration_milliseconds == 325544
+    assert work.video_url == "https://aweme.snssdk.com/aweme/v1/playwm/"
+    assert work.canonical_url == f"https://www.douyin.com/video/{DOUYIN_TEST_VIDEO_ID}"
+    assert sum(request.url.host == "www.iesdouyin.com" for request in requests) == 1
+    assert sum(request.url.path == "/aweme/v1/web/aweme/detail/" for request in requests) <= 3
+
+
+# Preserve the direct API success path without requesting a desktop landing page.
+def test_resolver_keeps_video_api_success_without_share_fallback() -> None:
+    """成功详情请求不依赖可能被拦截的网页。"""
+
+    # Provide the smallest valid video response from the existing API.
+    detail = {
+        "aweme_id": DOUYIN_TEST_VIDEO_ID,
+        "desc": "可用视频",
+        "video": {"play_addr": {"url_list": ["https://video.example/current.mp4"]}},
+    }
+    # Record requests to verify the fallback was unnecessary.
+    requests: list[httpx.Request] = []
+    # Make the share source unavailable to catch accidental dependency on it.
+    resolver = DouyinWebResolver(
+        DouyinSettings(),
+        _fallback_resolver_client(
+            httpx.Response(200, json={"aweme_detail": detail}),
+            httpx.Response(403),
+            requests,
+        ),
+    )
+
+    # A canonical URL already carries all information needed for the API.
+    work = resolver.resolve(f"https://www.douyin.com/video/{DOUYIN_TEST_VIDEO_ID}")
+
+    assert work.title == "可用视频"
+    assert all(request.url.host != "www.iesdouyin.com" for request in requests)
+
+
+# Reject unavailable or unrelated share data without exposing request credentials.
+@pytest.mark.parametrize(
+    "share_response",
+    [
+        httpx.Response(403, text="token-secret"),
+        httpx.Response(302, headers={"Location": "https://untrusted.example/?token=token-secret"}),
+        httpx.Response(200, text="<html>verification token-secret</html>"),
+        httpx.Response(200, text="<script>window._ROUTER_DATA = {invalid};</script>"),
+        _share_page_response([{"aweme_id": "999999", "desc": "无关作品"}]),
+        _share_page_response([]),
+        httpx.ReadTimeout("request failed with token-secret"),
+    ],
+    ids=["forbidden", "redirect", "no-state", "invalid-json", "wrong-work", "empty", "timeout"],
+)
+def test_resolver_rejects_unusable_share_data_safely(
+    share_response: httpx.Response | httpx.RequestError,
+) -> None:
+    """后备失败不会当作成功或向回执泄漏 URL、Cookie。"""
+
+    # Record requests to detect accidental cross-host redirect following.
+    requests: list[httpx.Request] = []
+    # Include an unavailable API so every case exercises the fallback boundary.
+    resolver = DouyinWebResolver(
+        DouyinSettings(),
+        _fallback_resolver_client(httpx.Response(403), share_response, requests),
+    )
+
+    # User-facing errors must carry only safe explanatory text.
+    with pytest.raises(ValueError) as caught:
+        resolver.resolve("https://v.douyin.com/QiPXAFzL37U/")
+
+    assert "抖音" in str(caught.value)
+    assert "https://" not in str(caught.value)
+    assert "token-secret" not in str(caught.value)
+    assert "anonymous-test" not in str(caught.value)
+    assert "a_bogus" not in str(caught.value)
+    assert all(request.url.host != "untrusted.example" for request in requests)
+
+
+# Keep the short-link host allowlist intact before any detail lookup.
+def test_resolver_rejects_cross_host_short_link_redirect() -> None:
+    """不跟随短链指向的非抖音主机。"""
+
+    # Track whether a redirect target was requested.
+    requested_hosts: list[str] = []
+
+    # Respond only to the initial short-link request.
+    def handler(request: httpx.Request) -> httpx.Response:
+        """模拟不可信的跳转目标。"""
+
+        requested_hosts.append(request.url.host)
+        return httpx.Response(302, headers={"Location": "https://untrusted.example/video/123"})
+
+    # Even a client configured to follow redirects must obey the resolver boundary.
+    resolver = DouyinWebResolver(
+        DouyinSettings(),
+        httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True),
+    )
+
+    with pytest.raises(ValueError):
+        resolver.resolve("https://v.douyin.com/QiPXAFzL37U/")
+
+    assert requested_hosts == ["v.douyin.com"]
 
 
 # 记录 COS 生命周期的 Fake。
